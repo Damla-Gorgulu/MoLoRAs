@@ -31,7 +31,7 @@ import torch
 from PIL import Image
 
 # parents[1] = MoLoRAs/ (the directory that contains lora_attention/)
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).parents[1]))
 
 from lora_attention.models.lora_pool import LoRAPool
 from lora_attention.models.moe_lora import MoELoRA

@@ -361,7 +361,7 @@ class WikiArtStage1Dataset(Dataset):
         pool: LoRAPool,
         wikiart_dir: str,
         label_map_path: str,
-        similarity_path: str,
+        similarity_path: Optional[str] = None,
         tau_label: float = 0.3,
         min_pool_size: int = 5,
         max_pool_size: int = 20,
@@ -383,9 +383,12 @@ class WikiArtStage1Dataset(Dataset):
         with open(label_map_path) as f:
             self.label_map: Dict[str, List[int]] = json.load(f)
 
-        # ── Load similarity matrix ────────────────────────────
-        sim_data = torch.load(similarity_path, map_location="cpu", weights_only=False)
-        self.similarity_matrix: torch.Tensor = sim_data["similarity_matrix"]  # (N_total, N_total)
+        # ── Load similarity matrix (optional — only needed for KL mode) ──
+        if similarity_path is not None:
+            sim_data = torch.load(similarity_path, map_location="cpu", weights_only=False)
+            self.similarity_matrix: Optional[torch.Tensor] = sim_data["similarity_matrix"]
+        else:
+            self.similarity_matrix = None
 
         # ── Build samples: (expert_idx, image_path) ──────────
         wikiart_path = Path(wikiart_dir)
@@ -423,10 +426,11 @@ class WikiArtStage1Dataset(Dataset):
             )
 
         self.rng = random.Random(seed)
+        target_mode = "KL (CLIP-similarity)" if similarity_path is not None else "one-hot CE"
         print(
             f"[WikiArtStage1Dataset] {len(self.samples)} samples, "
             f"{len(self.label_map)} categories, "
-            f"τ_label={tau_label}, pool ∈ [{min_pool_size}, {self.max_pool_size}]"
+            f"target={target_mode}, τ_label={tau_label}, pool ∈ [{min_pool_size}, {self.max_pool_size}]"
         )
 
     def __len__(self) -> int:
@@ -447,9 +451,15 @@ class WikiArtStage1Dataset(Dataset):
         )
         gt_pos = pool_indices.index(gt_idx)
 
-        # Soft target: (N,) distribution based on CLIP similarity
-        sims = self.similarity_matrix[gt_idx, pool_indices]  # (N,)
-        soft_target = torch.softmax(sims / self.tau_label, dim=0)  # (N,)
+        # Soft or one-hot target
+        if self.similarity_matrix is not None:
+            # KL mode: CLIP-similarity soft distribution
+            sims = self.similarity_matrix[gt_idx, pool_indices]  # (N,)
+            soft_target = torch.softmax(sims / self.tau_label, dim=0)  # (N,)
+        else:
+            # CE mode: one-hot at gt_pos (used as reference; training reads gt_pos directly)
+            soft_target = torch.zeros(len(pool_indices))
+            soft_target[gt_pos] = 1.0
 
         return {
             "image": img,

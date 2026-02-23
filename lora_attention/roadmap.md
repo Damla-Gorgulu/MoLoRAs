@@ -962,21 +962,569 @@ repos/MoLoRAs/lora_attention/
 
 ---
 
-## 19. Next Steps (v2.0 Implementation Order)
+## 19. v2.0 Implementation Status (updated 2026-02-23)
 
-| Priority | Task | Status |
-|----------|------|--------|
-| 🔴 1 | Implement `models/rank_encoder.py` (LoRARankEncoder) | Not started |
-| 🔴 2 | Implement `models/moe_lora_v2.py` (per-tensor attention + batched encoder) | Not started |
-| 🔴 3 | Update `models/lora_pool.py` (remove old features, add batched tensor getters) | Not started |
-| 🔴 4 | Implement `utils/clip_similarity.py` (109×109 matrix) + generate `wikiart_label_map.json` | Not started |
-| 🔴 5 | Implement `data/dataset.py` updates (WikiArtDataset + soft targets) | Not started |
-| 🔴 6 | Implement `train_stage1_v2.py` (per-tensor KL + soft targets) | Not started |
-| 🔴 7 | Implement `train_stage2_v2.py` (LDM + entropy regularisation) | Not started |
-| 🔴 8 | Create v2.0 SLURM scripts | Not started |
-| 🔴 9 | Submit v2.0 Stage-1 training | Blocked by 1–8 |
-| 🔴 10 | Submit v2.0 Stage-2 training | Blocked by 9 |
-| 🔴 11 | Re-run generalization suite + analysis | Blocked by 10 |
-| 🟡 12 | Ablation: T=80 vs T=20 vs T=1 | After 11 |
-| 🟡 13 | Ablation: τ_label sweep | After 11 |
-| 🟢 14 | Paper figures + quantitative eval | Final |
+| Phase | Task | Status |
+|-------|------|--------|
+| ✅ | Implement `models/rank_encoder.py` (LoRARankEncoder) | Done |
+| ✅ | Implement `models/moe_lora_v2.py` (per-tensor attention) | Done |
+| ✅ | Update `models/lora_pool.py` (batched tensor getters) | Done |
+| ✅ | Implement `utils/clip_similarity.py` + `wikiart_label_map.json` | Done |
+| ✅ | `data/dataset.py` — WikiArtDataset + soft targets + no `self.pool` | Done |
+| ✅ | `train_stage1_v2.py` — per-tensor KL + soft targets | Done |
+| ✅ | `train_stage2_v2.py` — LDM + entropy regularisation | Done |
+| ✅ | v2.0 SLURM scripts (all 4) | Done |
+| ✅ | Phase 0 — CLIP similarity matrix + label map | Done (job 761128) |
+| ✅ | Phase 1 — Stage 1 v2.0 training (15 000 steps) | Done (job 761184) |
+| ⏳ | Phase 2 — Stage 2 v2.0 training (8 000 steps) | Running (job 761720, step ~2900/8000) |
+| ✅ | Phase 3 — Generalization suite with S1 checkpoint | Done (job 761724) |
+| 🔴 | Phase 3b — Generalization suite with S2 checkpoint | Blocked by Phase 2 |
+| 🔴 | Phase 4 — Full analysis + comparison grid | After Phase 3b |
+| 🟡 | Ablation: τ_inference sweep (0.01 / 0.05 / 0.1 / 0.5) | After Phase 3b |
+| 🟡 | Ablation: T=80 vs T=20 vs T=1 | After Phase 3b |
+| 🟢 | Paper figures + quantitative eval | Final |
+
+---
+
+## 20. v2.0 Experimental Results (2026-02-23)
+
+### 20.1 — Training Checkpoints
+
+| Checkpoint | Path | Final Loss | Steps |
+|------------|------|-----------|-------|
+| Stage 1 v2.0 | `/scratch/eyavuz21/lora_attention/stage1_v2/latest.pt` | 0.303 (KL) | 15 000 |
+| Stage 2 v2.0 | `/scratch/eyavuz21/lora_attention/stage2_v2/latest.pt` | ~0.56 LDM (in progress) | ~2900/8000 |
+
+Stage 1 loss curve: 0.348 → 0.303 over 15 000 steps, entropy stabilised at ~2.44.
+Stage 2 at step 2900: LDM=0.565, entropy contribution=−0.164, λ=0.0674 (annealing 0.1→0.01).
+
+---
+
+### 20.2 — Generalization v2 Results (S1 checkpoint, τ=0.1)
+
+All 26 runs completed (job 761724, 2026-02-23). Results directory: `/scratch/eyavuz21/lora_attention/generalization_v2/`
+
+Every output folder contains: `__query.jpg` (input) + `__top1…__top5` expert thumbnails alongside generated images and `_heatmap.png`.
+
+#### Exp A — Recognition Test (singleton pool experts, 7 styles × 2 conditions)
+
+| Style | Condition | Entropy | Max ent | Top-1 retrieved | GT rank |
+|-------|-----------|---------|---------|-----------------|---------|
+| Baroque | in-pool | 4.05 | 4.69 | Realism | **#6** |
+| Baroque | held-out | 4.03 | 4.68 | Realism | — |
+| Color Field | in-pool | 4.24 | 4.69 | Abstract Expressionism | — (no GT in pool) |
+| Color Field | held-out | 4.24 | 4.68 | Abstract Expressionism | — |
+| Cubism | in-pool | 3.93 | 4.69 | Cubism | **#1** ✓ |
+| Cubism | held-out | 3.95 | 4.68 | Abstract Expressionism | — |
+| Early Renaissance | in-pool | 4.11 | 4.69 | Symbolism | **#2** |
+| Early Renaissance | held-out | 4.10 | 4.68 | Symbolism | — |
+| Fauvism | in-pool | 4.04 | 4.69 | Cubism | **#11** |
+| Fauvism | held-out | 4.02 | 4.68 | Cubism | — |
+| High Renaissance | in-pool | 4.07 | 4.69 | Baroque | **#3** |
+| High Renaissance | held-out | 4.06 | 4.68 | Baroque | — |
+| Northern Renaissance | in-pool | 4.06 | 4.69 | Realism | **#38** |
+| Northern Renaissance | held-out | 4.04 | 4.68 | Realism | — |
+
+GT rank #1 in 1/7 styles (Cubism). Average GT rank ≈ 10. All entropies ≈ 4.0–4.2 / max 4.69.
+
+#### Exp B — Specialisation Test (multiple pool experts per training style)
+
+| Style | Entropy | Top-1 retrieved |
+|-------|---------|-----------------|
+| Abstract Expressionism | 4.17 | Symbolism |
+| Expressionism | 4.09 | Cubism |
+| Impressionism | 4.12 | Realism |
+| Post-Impressionism | 4.05 | Cubism |
+| Romanticism | 4.10 | Realism |
+
+Zero out of 5 styles correctly retrieved a same-family expert as top-1. Entropy uniformly high.
+
+#### Exp C — Transfer Test (zero-shot styles not in pool)
+
+| Novel Style | Entropy | Top-1 retrieved | Reasonable? |
+|-------------|---------|-----------------|-------------|
+| Action Painting | 3.85 | Abstract Expressionism | ✓ related |
+| Analytical Cubism | 4.00 | Cubism | ✓ correct family |
+| Mannerism | 4.13 | Early Renaissance | ✓ historically close |
+| Pointillism | 4.06 | Cubism | ✗ (should be Impressionism) |
+| Rococo | 4.08 | Baroque | ✓ correct family |
+| Synthetic Cubism | 4.12 | Cubism | ✓ correct family |
+| Ukiyo-e | 4.16 | Symbolism | ~ debatable |
+
+5/7 Exp C retrievals are semantically reasonable — the encoder has learned broad style-family structure even without explicit zero-shot training.
+
+---
+
+### 20.3 — Why the Output Images Show No Visible Style Activation
+
+**Observation**: the attention heatmap correctly ranks the GT expert near the top, but the generated images show no visible style transfer.
+
+There are two hypotheses and one root-cause diagnosis:
+
+#### Hypothesis 1 — "The LoRA only fires when its style name appears in the prompt"
+
+**This is incorrect.** B-LoRA style transfer works by directly modifying the UNet weight tensors (via `inject_lora`). The LoRA weights are additive parameter modifications that affect every denoising step regardless of the text prompt. There is no gating mechanism that checks whether a style name appears in the prompt before applying the weights.
+
+Concretely, after `inject_lora(pipeline, synth_sd, style_alpha=1.0)`, the UNet's `up_blocks.0.attentions.1` block is permanently modified until `unload_lora()` is called. The prompt is used only for cross-attention keys/values in the text-conditioning path, which is a separate mechanism.
+
+#### Hypothesis 2 — "Stage 1 hasn't learned the correct mapping yet; Stage 2 results may differ"
+
+**Partially correct.** The real diagnosis is below.
+
+#### Root cause: near-uniform attention (entropy too close to maximum)
+
+The entropy numbers tell the story directly:
+
+```
+Near-uniform distribution: entropy ≈ 4.0–4.2  out of max 4.69
+Fraction of max entropy:   e/e_max ≈ 0.86 – 0.90
+Implied top-1 weight:      ~1/109 + small delta ≈ 0.009 – 0.05
+```
+
+With 109 experts and near-uniform weights, the synthesised LoRA is:
+
+$$W_{\text{synth}} \approx \frac{1}{109} \sum_{i=1}^{109} W_i$$
+
+This is the **average of all known styles**, which carries no coherent style signal and generates a style-neutral image (equivalent to not injecting any LoRA at all).
+
+**Compare to v1.0 Stage 1** (from §14): at τ=0.01 the entropy collapsed to ~0.001 (one expert takes all weight), which gave visible style transfer but incorrect expert selection. The v2.0 problem is the opposite: training drove attention toward the *uniform* distribution (which maximises the KL soft-target loss when the CLIP similarity matrix is also relatively flat for novel WikiArt images).
+
+**Why Stage 2 may help (partially)**: Stage 2 loss is `L_LDM - λ·H̄(A)`. The `- λ·H̄(A)` term *maximises* entropy, which would make this problem worse at inference. However, the LDM loss `L_LDM` forces the synthesis to be coherent — in order to minimise reconstruction error, the model must learn to assign non-trivial weight to the expert that actually matches the query image. So Stage 2 may push the encoder to form sharper keys indirectly through the reconstruction signal.
+
+**The cleanest fix**: lower `--temperature` at inference time. At τ=0.1, the softmax is still relatively flat. Try τ=0.01:
+
+```bash
+# In inference_v2.sh, change:
+--temperature 0.1
+# to:
+--temperature 0.01
+```
+
+At τ=0.01, softmax differences of 0.001 in the dot-product become amplified by 10×, turning near-uniform attention into a sharper peaked distribution. This should be tested immediately on a single run after Stage 2 completes.
+
+---
+
+### 20.4 — Code Changes Since §18
+
+| File | Change |
+|------|--------|
+| `inference_v2.py` | Sanitize `query_label` slashes in `label_prefix` (fix path bug); copy `__query.jpg` + `__top1…5` expert thumbnails to every output folder |
+| `inference.py` | Same thumbnail-copying block |
+| `backfill_reference_images.py` | **NEW** — backfills `__query` + `__top1…5` images into all 78 existing run folders |
+| `slurm/generalization_v2.sh` | **NEW** — v2.0 26-run generalization sweep (Exp A/B/C, same WikiArt queries as §15) |
+
+---
+
+### 20.5 — LoRA Injection Diagnostic: Results & Interpretation
+
+**Context**: Sweep job 761782 was cancelled after all outputs looked identical regardless
+of style, temperature, or top-k. Suspected `inject_lora()` was silently doing nothing.
+A prior login-node test showed "UNet base-weight diff = 0.000000" which looked alarming.
+
+GPU diagnostic job **761798** ran on `ai12` (V100) and produced full results.
+Full report: `/scratch/eyavuz21/lora_attention/diagnose_lora_inject/report.txt`
+
+---
+
+#### What Each Test Actually Measures
+
+Before the results, here is what each setup means, concretely:
+
+**"Vanilla SDXL"** — the frozen SDXL base model, no LoRA of any kind. This is the
+baseline every test image is compared against. MAE diff = 0 by definition.
+
+**"load_lora_into_unet (raw keys)"** — the current `inject_lora()` path in our code.
+Calls `pipeline.load_lora_into_unet(state_dict, None, pipeline.unet)` with the raw
+`lora.down.weight / lora.up.weight` keys from the safetensors files. Diffusers installs
+LoRA as **attention processors**: small wrapper objects that sit on top of existing
+`to_q/to_k/to_v/to_out` projection layers. They do NOT modify the base weight tensors
+— this is why the login-node test `(W_after - W_before).abs().mean() == 0` was measuring
+the wrong thing. The _weights_ do not change; the _computation_ changes through the
+processor. At generation time, for every attention layer that has a LoRA processor:
+```
+output = W_base(x)  +  scale * W_up( W_down(x) )     # LoRA delta added live
+```
+
+**"load_lora_into_unet (api keys)"** — same call, but the state dict was first loaded
+via `pipeline.lora_state_dict(path)`. In B-LoRA's original inference code, this
+high-level API is called first. We tested whether it performs any key conversion that
+our direct path misses.
+
+**"Hook-based injection (apply_lora_hooks_with_grad)"** — an alternative in
+`lora_inject.py` that does NOT use the diffusers processor API at all. Instead, it
+finds each target layer by traversing `unet.get_submodule(layer_path)` and registers a
+`torch.Tensor.register_hook` / `nn.Module.register_forward_hook` that intercepts the
+layer output and adds the LoRA delta inline:
+```python
+def hook_fn(module, input, output):
+    x = input[0]
+    return output + alpha * (x @ W_down.T) @ W_up.T
+```
+Hooks are stored as `RemovableHandle` objects and removed by calling `remove_hooks(handles)`.
+This path was designed for Stage 2 training (where we need gradients to flow back through
+the delta into the MoE encoder). It does NOT use diffusers' processor mechanism.
+
+**"Direct weight merge"** — bypasses all APIs. Manually computes
+`layer.weight.data += alpha * W_up @ W_down` for every layer, permanently baking the
+LoRA delta into the base weights. Used here as a sanity check to confirm the LoRA
+tensors themselves have correct values and shapes. Requires undoing the delta afterward.
+
+**"Synth LoRA (MoELoRAv2, S1 checkpoint)"** — generates a synthesised LoRA by running
+the MoELoRAv2 encoder on a Baroque WikiArt query image, routing across all 109 pool
+experts. The resulting state dict is a weighted sum of expert LoRA tensors. This is what
+the actual inference pipeline uses. Tested at τ=0.1 (spread routing) and τ=0.01 (sharp).
+
+---
+
+#### Diagnostic Results (job 761798 — ✅ completed)
+
+```
+USE_PEFT_BACKEND = False
+Device: cuda (Tesla V100-SXM2-32GB)
+```
+
+**Key format audit:**
+```
+Raw safetensors keys (attentions.1 block): 160
+Via pipeline.lora_state_dict() API:        160
+Raw key[0] == API key[0]:                  True
+```
+→ No key conversion happens in `lora_state_dict()`. Both paths see identical keys.
+
+**Injection tests — MAE pixel difference between each method and vanilla SDXL:**
+
+| Test | Setup | MAE diff | Verdict |
+|------|-------|----------|---------|
+| Real B-LoRA (Baroque) | `load_lora_into_unet` raw keys | **32.01** | ✅ WORKING |
+| Real B-LoRA (Baroque) | `load_lora_into_unet` API keys | **32.01** | ✅ WORKING (identical) |
+| Real B-LoRA (Baroque) | Hook-based injection | **32.01** | ✅ WORKING (identical) |
+| Real B-LoRA (Baroque) | Direct weight merge | **31.93** | ✅ WORKING (≈ same) |
+| Synth LoRA (τ=0.1, Baroque query) | `load_lora_into_unet` | **8.57** | ⚠️ ACTIVE but weak |
+| Synth LoRA (τ=0.1, Baroque query) | Hook-based | **8.57** | ⚠️ ACTIVE but weak (identical) |
+| Synth LoRA (τ=0.01, Baroque query) | `load_lora_into_unet` | **9.57** | ⚠️ ACTIVE but weak |
+
+**MoELoRAv2 routing for Baroque query (WikiArt image, not training image):**
+```
+τ=0.1 — Top-5 experts:
+  #1: style_0001_Realism   avg_attention=0.043
+  #2: style_0009_Realism   avg_attention=0.033
+  #3: style_0104_Realism   avg_attention=0.030
+  #4: style_0034_Symbolism avg_attention=0.029
+  #5: style_0080_Romanticism avg_attention=0.029
+  Entropy: 4.05 / 4.69 max  (86% of maximum — near-uniform)
+
+τ=0.01 — Top-1: style_0001_Realism, Entropy: 3.12 / 4.69
+```
+
+---
+
+#### What This Means
+
+**1. `inject_lora()` is NOT broken.** The login-node test was measuring the wrong thing.
+LoRA processors work by augmenting the computation inside each attention layer — they do
+not change the raw weight tensors stored in `layer.weight`. Measuring `(W_after - W_before).abs().mean()`
+will always return 0.0 even when injection is fully working. The correct test is to
+generate an image and measure the pixel-level change, which is what the GPU diagnostic did.
+Real B-LoRA injection produces MAE diff = 32.0 — large and obvious visual change.
+
+**2. All four injection methods are equivalent.** `load_lora_into_unet` (raw keys), 
+`load_lora_into_unet` (API keys), hook-based, and direct weight merge all produce
+essentially the same pixel output (MAE diff ≈ 32). No need to change `inject_lora()`.
+
+**3. The synthesised LoRA IS being injected, but it is weak.** MAE diff = 8.57 for the
+synth LoRA vs 32.0 for real B-LoRA. The injection code is fine; the LoRA weights
+themselves have low effective magnitude because they are a near-uniform weighted average
+of 109 experts:
+
+$$W_{\text{synth}} \approx \sum_{i=1}^{109} \frac{1}{109} W_i = \bar{W}$$
+
+The random experts partially cancel each other out (different styles push attention in
+different directions), so the net delta is much smaller than a single-style LoRA.
+
+**4. The routing is wrong for Baroque queries.** Even at τ=0.01, the top-1 expert for
+a Baroque WikiArt image is `style_0001_Realism`, not any Baroque expert. The S1v2
+encoder maps this Baroque painting to Realism experts in CLIP space. This is the same
+CLIP embedding gap problem as in v1.0 (§15): the training image for each style is one
+specific painting; a different WikiArt painting of the same style may be closer in CLIP
+space to a different style's training image.
+
+**5. The reason the sweep outputs all looked the same:**
+Near-uniform attention (entropy 4.05–4.2 / 4.69) means the synthesised LoRA is nearly
+the same blob for every query style — the weighted average of all 109 experts changes
+only slightly as the query changes, because no single expert gets more than ~4% weight.
+The small per-run variation (MAE diff 8.6–9.6) is below the visual threshold for style
+transfer. The sweep was correct to be cancelled.
+
+---
+
+#### What is NOT the problem
+- ✅ Key format — raw `lora.down/lora.up` keys work perfectly with `USE_PEFT_BACKEND=False`
+- ✅ `inject_lora()` code — it works; no change needed
+- ✅ The LoRA tensors in the pool — they have the right values (direct merge confirms MAE ≈ 32)
+- ✅ diffusers API — `load_lora_into_unet` with `USE_PEFT_BACKEND=False` correctly falls through to `unet.load_attn_procs()`
+
+#### What IS the problem
+- ❌ **S1v2 routing quality**: near-uniform attention entropy (4.05/4.69) → synthesised LoRA is a diluted average → MAE diff only 8–9 vs 32 for a real single LoRA
+- ❌ **Wrong expert selected**: Baroque WikiArt query → Realism top-1 (same CLIP embedding gap as v1.0, §15)
+- ❌ Two root causes compound: even if entropy were lower, the selected expert would still be wrong
+
+---
+
+### 20.6 — Status Update (2026-02-24) *(superseded by §22)*
+
+~~**Root cause confirmed as weak magnitude due to expert averaging** — `--norm_match`
+was added but images were still identical.~~
+
+**Actual root cause found in §22**: O(N²) cross-term cancellation in parameter-averaging
+synthesis, not magnitude. `norm_match` had no effect because `synth_norm` was already ~45
+(close to target 50). The synthesis itself was computing noise.
+
+- `slurm/s1v2_sweep.sh` and `slurm/s2v2_sweep.sh` used *broken* parameter-averaging.
+- **Jobs 762274 and 762279 cancelled** — results invalid.
+- **Stage 2 v2.0 training completed** — see §21.
+- **Fix implemented and new sweeps submitted** — see §22.
+
+---
+
+## 21. Stage 2 v2.0 — Training Complete & Experiment Plan (2026-02-24)
+
+### 21.1 — S2 v2.0 Training Results
+
+| Item | Value |
+|------|-------|
+| Total steps | 8 000 / 8 000 |
+| Learning rate | 5e-5 |
+| λ_entropy schedule | 0.1 → 0.01 (linear warmdown over 8k steps) |
+| Final total loss | 0.563 |
+| Final LDM loss | 0.589 |
+| Final entropy term | −0.025 |
+| Checkpoint | `/scratch/eyavuz21/lora_attention/stage2_v2/latest.pt` |
+| Saved checkpoints | every 500 steps (checkpoint-500 … checkpoint-8000) |
+
+**Observation on entropy term**: `ent = −0.025 < 0` means the Stage 2 objective is
+successfully *maximising* attention entropy (−λH̄(A) reward). The LDM reconstruction
+loss partially counteracts this, but the net result may be that S2 routing is *flatter*
+than S1's 4.05/4.69 bits — potentially making the mixing-cancellation problem worse.
+This must be measured experimentally.
+
+### 21.2 — S2 v2.0 Inference Sweep Plan *(superseded by §22)*
+
+~~Identical structure to `slurm/s1v2_sweep.sh` (4 sweeps, ~80 runs) with two changes:~~
+
+~~Script: `slurm/s2v2_sweep.sh` — submitted as **job 762279** (queued behind job 762274).~~
+
+**Both jobs (762274 and 762279) were cancelled** — they used the broken parameter-averaging
+synthesis and produced identical-looking outputs for all LoRA configurations. See §22 for
+the root-cause diagnosis and corrected sweeps.
+
+**Replaced by**: `slurm/s1v2_ps_sweep.sh` (job **762340**) and `slurm/s2v2_ps_sweep.sh`
+(job **762341**), both using `--product_synth` (correct product-space synthesis).
+
+**Key questions now answered by §22 sweeps:**
+
+1. Does product-space synth produce visible style change at any routing sharpness?
+2. Does `top_k=1` (oracle single-expert) prove injection is correct independent of routing?
+3. Does S1 vs S2 routing entropy differ, and which gives better visual quality?
+
+### 21.3 — Routing Fix Roadmap (regardless of S2 result)
+
+Even if S2 is better, the underlying problem is the KL soft target derived from
+CLIP similarity — the Baroque WikiArt test image lands nearest to *Realism* in the
+pool's CLIP space. Fix options in priority order:
+
+1. **Option A — Diverse S1 pairs** (fastest): Use 10–20 WikiArt images per style
+   during Stage 1 training (not just the blora_zoo thumbnail). Gives the encoder
+   many CLIP anchors per style, covering the full intra-style variation.
+2. **Option B — Classification target**: Replace soft KL target with one-hot label
+   supervision on the *style name* (not the *most similar training image*). Breaks
+   the CLIP embedding gap entirely.
+3. **Option C — WikiArt dataset pairs**: Train directly on WikiArt images paired
+   with their ground-truth style B-LoRA expert (requires building per-style B-LoRAs
+   from the full WikiArt split, which is expensive but correct).
+
+**Decision gate**: inspect `clip_similarity.pt` to confirm Baroque→Realism mismatch
+before committing to a fix:
+
+```bash
+python - <<'EOF'
+import torch, json
+sim = torch.load('/scratch/eyavuz21/lora_attention/clip_similarity.pt')
+# shape: [N_pool, N_pool] or [N_test, N_pool]
+print(sim.shape)
+# identify Baroque row and its top-3 columns
+EOF
+```
+4. **Compare S1 vs S2 vs τ-sweep** routing sharpness and generated image quality side by side using the `__query`/`__top1…5` thumbnails now present in every folder.
+---
+
+## 22. Critical Bug Found & Fixed: Cross-Term Cancellation in LoRA Synthesis (2026-02-24)
+
+### 22.1 — The Bug
+
+**Root cause of invisible style transfer in all v2 runs.**
+
+MoELoRA averaged `W_down` and `W_up` matrices *independently*:
+```python
+# BROKEN (parameter-averaging — what was implemented)
+synth_down = Σ_i A[i] * W_down[i]   # (r, d_in)
+synth_up   = Σ_i A[i] * W_up[i]     # (d_out, r)
+```
+
+But the *actual* style signal is carried by the *product* `ΔW = W_up @ W_down`:
+
+```
+(Σ A_i W_up_i) @ (Σ A_j W_down_j)
+  = Σ_i A_i² (W_up_i @ W_down_i)                 ← useful diagonal (N terms)
+  + Σ_{i≠j} A_i A_j (W_up_i @ W_down_j)          ← cross-term noise (N²-N terms)
+```
+
+With uniform attention `A_i = 1/N`:
+- Diagonal term weight: `N × (1/N)² = 1/N = 1/109 ≈ 0.9%`
+- Cross-term weight: `N(N-1) × (1/N)² ≈ (N-1)/N ≈ 99.1%`
+
+The cross-terms `W_up_i @ W_down_j` (i≠j) are random-looking noise that destroys
+every consistent style direction. With N=109, the signal is diluted by **108×** relative
+to the noise, causing the synthesised LoRA to have near-zero net style effect.
+
+### 22.2 — Measured Evidence
+
+From `diagnose_lora_inject.py` (job 761798) and cross-term analysis:
+
+| Method | Product norm | cos vs oracle | Explanation |
+|--------|-------------|---------------|-------------|
+| Real B-LoRA injection | 3.574 | 1.00 | Single expert, no averaging |
+| Old synth (uniform 1/N) | 0.227 | 0.10 | Cross-terms dominate — noise |
+| **New synth (product-space)** | **≈0.42** | **0.99** | **Correct sum of products** |
+| One-hot synth (top-k=1) | 3.574 | 1.00 | Single expert, equivalent to real |
+
+*(norm comparison on first tensor block; oracle = Baroque expert)*
+
+**Why v1 worked but v2 didn't**: v1 used much sharper routing (entropy < 1 bit).
+With most weight on one expert: diagonal ≫ cross-terms → barely visible style.
+v2 trained with entropy regularisation → uniform routing → cross-terms dominate.
+But the cross-term bug also affects v1 at any routing sharpness — it was just masked.
+
+### 22.3 — The Fix: Product-Space Synthesis
+
+```python
+# CORRECT (product-space averaging — implemented 2026-02-24)
+W_avg[t] = Σ_i a[i,t] * (W_up[i,t] @ W_down[i,t])  # (d_out, d_in)
+
+# Decompose back to rank-r LoRA via truncated SVD:
+U, S, Vh = torch.linalg.svd(W_avg[t])
+W_down_synth[t] = diag(√S[:r]) @ Vh[:r]   # (r, d_in)
+W_up_synth[t]   = U[:, :r] @ diag(√S[:r]) # (d_out, r)
+# Guarantees: W_up_synth @ W_down_synth ≈ W_avg (best rank-r approx.)
+```
+
+**Verified numerically** on login node (N=5, small test):
+- One-hot routing: `cos(ref, new) = 1.000` ✓
+- Uniform routing: `cos(ref, new) = 0.9998`, `cos(ref, old) = 0.886` ✓
+
+### 22.4 — Changes Made
+
+| File | Change |
+|------|--------|
+| `models/moe_lora_v2.py` | Added `_synthesise_product_space()` method; `forward(..., product_space=False)` param |
+| `inference_v2.py` | Added `--product_synth` flag; passes `product_space=args.product_synth` to `model.forward()` |
+| `slurm/s1v2_ps_sweep.sh` | New sweep: S1 ckpt + `--product_synth`, 4 sweeps ~80 runs |
+| `slurm/s2v2_ps_sweep.sh` | New sweep: S2 ckpt + `--product_synth`, same structure |
+
+`--product_synth` is **off by default** (backward-compatible). All new experiments
+should use it.
+
+**Cancelled jobs**: 762274 (S1v2-Sweep, broken), 762279 (S2v2-Sweep, broken).
+**Submitted jobs**: **762340** (S1v2-PS), **762341** (S2v2-PS).
+
+### 22.5 — Training Impact & Next Steps
+
+The SAME bug exists in `train_stage1_v2.py` and `train_stage2_v2.py` — both compute
+`synth_lora` via parameter averaging, feed it into SDXL for the LDM loss, and the
+cross-term noise means the training signal for routing quality is corrupted. The model
+trained successfully (low LDM loss) because it learned to ignore the noisy synth LoRA
+injection entirely (i.e., the gradient flows primarily through the text conditioning,
+not through the routing decision).
+
+**Fix training**: Replace `_synthesise_batched` → `_synthesise_product_space` as the
+default in `train_stage1_v2.py` and `train_stage2_v2.py`. Then retrain from scratch.
+
+**Immediate experiments (pending sweeps 762340 / 762341)**:
+1. Do product-space synth sweeps with *current* checkpoints show visible style?
+   - If yes → training loss signal was sufficient; only inference was broken.
+   - If no → both training and inference need fixing; retrain with corrected synthesis.
+2. Does `top_k=1` (oracle single-expert) produce strong style at any temperature?
+   - If yes → injection is correct; routing quality is the remaining problem.
+3. Does S1 routing (less entropy regularisation) give better style than S2?
+
+### 22.6 — Residual Problem (Routing Quality)
+
+Even with the correct synthesis, near-uniform routing over 109 experts produces
+`W_avg ≈ mean of all style LoRAs` which is approximately "vanilla SDXL with subtle
+average-style drift". Visible individual style transfer requires sharp routing.
+
+Routing fix options (unchanged from §21.3):
+1. Option A: diverse S1 pairs (multiple images per style during training)
+2. Option B: classification supervision target (one-hot label, not CLIP similarity)
+3. Option C: full WikiArt training split paired with per-style B-LoRA experts
+
+---
+
+## §23 — v2.1 Architecture Update
+
+### 23.1 — Summary of Changes
+
+Three inter-related changes land together as "v2.1":
+
+| Component | v2.0 | v2.1 |
+|-----------|------|------|
+| Synthesis | `_synthesise_batched` default (cross-term bug) | `_synthesise_product_space` default (`product_space=True`) |
+| Stage 1 target | KL(CLIP-similarity soft targets) | One-hot CE on style label (default `--target_mode ce`) |
+| Stage 1 data requirement | Requires `clip_similarity.pt` | No CLIP similarity file needed in CE mode |
+
+### 23.2 — Why CE Instead of CLIP-Similarity KL
+
+CLIP similarity clusters images by **subject matter**, not artistic style.
+A Baroque portrait's nearest neighbour in the pool is often a Realism portrait
+(both have human subjects, similar colour temperature, comparable composition).
+This confusion signal prevents the encoder from learning style-invariant features.
+
+One-hot CE on the **style label name** is cleaner: the encoder must learn what
+distinguishes "Baroque" from "Realism" at the feature level, not what makes one
+portrait photo look like another.
+
+### 23.3 — CE Loss Formulation
+
+```
+A: (N, T, r)   — per-expert, per-tensor, per-rank attention (softmax over N)
+gt_pos: int    — index of GT expert in the sampled pool
+
+A_avg = A.mean(dim=2)          # (N, T) — average over rank dim
+log_A = (A_avg + 1e-8).log()  # (N, T)
+gt_targets = full((T,), gt_pos, long)
+L = nll_loss(log_A.T, gt_targets)   # mean over T
+```
+
+This is equivalent to `-mean_T log(A_avg[gt_pos, t])`, which maximises the
+probability mass on the GT expert across all T tensor groups.
+
+### 23.4 — Product-Space SVD Stabilisation
+
+`_synthesise_product_space` now uses `(S[:r_use] + 1e-8).sqrt()` instead of
+`S[:r_use].sqrt()` to avoid infinite gradients near S ≈ 0 during Stage 2 backprop.
+The broad `try/except` around the SVD was also removed; if SVD fails (degenerate
+W_avg with identical rows), the error surfaces cleanly.
+
+### 23.5 — Files Changed
+
+- `models/moe_lora_v2.py`: `product_space=True` default in `forward()` + `route()`; SVD stabilised
+- `data/dataset.py`: `similarity_path: Optional[str] = None`; KL similarity matrix loaded only when provided
+- `train_stage1_v2.py`: `--target_mode {ce,kl}` (default `ce`); `compute_ce_loss()`; branches in train loop; `--similarity_path` now optional
+- `train_stage2_v2.py`: `model.forward(..., product_space=True)` made explicit
+
+### 23.6 — New Training Jobs
+
+Stage 1 v2.1 should be re-run from scratch with `--target_mode ce` and a new
+`--output_dir /scratch/eyavuz21/lora_attention/stage1_v21/`.  No `--similarity_path`
+required.  Stage 2 v2.1 then loads the resulting Stage 1 checkpoint.
+
+See `slurm/train_stage1_v21.sh` for the SLURM submission script.

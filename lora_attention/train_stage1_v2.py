@@ -1,32 +1,45 @@
 #!/usr/bin/env python3
 """
-v2.0 Stage 1 Training: Soft-Target Per-Tensor Routing
+v2.1 Stage 1 Training: One-Hot Cross-Entropy Routing (default) or Soft-KL (legacy)
 
 Trains the LoRARankEncoder to map WikiArt style images to per-tensor
-rank-level attention distributions using soft CLIP-similarity targets.
+rank-level attention distributions.
+
+Target modes:
+  ce  (default) — one-hot cross-entropy on the GT expert label.
+                  Forces encoder to learn *style* invariants; no CLIP similarity
+                  file required.  Generally preferred.
+  kl  (legacy)  — KL divergence against CLIP-similarity soft targets.
+                  Requires --similarity_path.  Prone to content-based confusion
+                  because CLIP clusters by subject matter, not artistic style.
 
 Key differences from v1.0:
   - LoRARankEncoder replaces RoutingMLP (2.2M vs 17.3M params)
   - Per-tensor attention: A ∈ ℝ^{N×T×r} instead of A ∈ ℝ^{N×r}
-  - Soft targets via CLIP similarity (KL divergence, not MSE)
+  - Product-space synthesis (default): W_synth = Σ_i A_i(W_up_i @ W_down_i)
   - WikiArt dataset (~80k images) instead of 109 zoo images
   - τ = 1.0 at training (no temperature hack)
 
-Loss:
-  For each tensor group t ∈ [0, T):
-    L_t = KL(log(A_t), soft_target)     (expert-level, broadcast to all ranks)
-  L = (1/T) Σ_t L_t
+Loss (CE mode, default):
+  A_avg = A.mean(dim=2)            # (N, T) — average over rank
+  L = CrossEntropy(A_avg.T, gt_pos_broadcast)
 
-Only the LoRARankEncoder is updated; CLIP and LoRA pool are frozen.
-
-Example:
+Example (CE, recommended — no CLIP similarity file needed):
     python train_stage1_v2.py \\
-        --output_dir /scratch/eyavuz21/lora_attention/stage1_v2 \\
+        --output_dir /scratch/eyavuz21/lora_attention/stage1_v21 \\
         --zoo_dir /home/eyavuz21/repos/B-LoRA/blora_zoo/bloras \\
         --cache_dir /scratch/eyavuz21/lora_attention \\
         --wikiart_dir /home/eyavuz21/datasets/wikiart \\
-        --similarity_path /scratch/eyavuz21/lora_attention/clip_similarity.pt \\
         --label_map_path /scratch/eyavuz21/lora_attention/wikiart_label_map.json \\
+        --target_mode ce \\
+        --max_steps 15000 \\
+        --lr 3e-4
+
+Example (KL legacy mode):
+    python train_stage1_v2.py \\
+        --output_dir /scratch/eyavuz21/lora_attention/stage1_v2_kl \\
+        --similarity_path /scratch/eyavuz21/lora_attention/clip_similarity.pt \\
+        --target_mode kl \\
         --max_steps 15000 \\
         --lr 3e-4
 """
@@ -42,7 +55,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 # ── Path setup ──────────────────────────────────────────────
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).parents[1]))
 
 from lora_attention.models.lora_pool import LoRAPool
 from lora_attention.models.moe_lora_v2 import MoELoRAv2
@@ -67,8 +80,11 @@ def parse_args():
                    default="/scratch/eyavuz21/lora_attention/stage1_v2")
     p.add_argument("--wikiart_dir", type=str,
                    default="/home/eyavuz21/datasets/wikiart")
-    p.add_argument("--similarity_path", type=str,
-                   default="/scratch/eyavuz21/lora_attention/clip_similarity.pt")
+    p.add_argument("--similarity_path", type=str, default=None,
+                   help="Path to clip_similarity.pt. Required only for --target_mode kl.")
+    p.add_argument("--target_mode", type=str, default="ce", choices=["ce", "kl"],
+                   help="'ce': one-hot cross-entropy (default, no CLIP sim needed). "
+                        "'kl': soft KL vs CLIP-similarity targets (legacy).")
     p.add_argument("--label_map_path", type=str,
                    default="/scratch/eyavuz21/lora_attention/wikiart_label_map.json")
     p.add_argument("--resume_from", type=str, default=None,
@@ -164,7 +180,36 @@ def load_checkpoint(
 
 
 # ──────────────────────────────────────────────────────────────
-# Per-tensor KL loss
+# Per-tensor CE loss (default, v2.1)
+# ──────────────────────────────────────────────────────────────
+def compute_ce_loss(
+    A: torch.Tensor,  # (N, T, r) — predicted attention
+    gt_pos: int,      # index of GT expert within pool
+    device: torch.device,
+) -> torch.Tensor:
+    """
+    One-hot cross-entropy routing loss.
+
+    For each tensor group t, we want A[gt_pos, t, :] >> A[other, t, :].
+    We average over rank dimension first, then apply NLL loss over T samples.
+
+    Args:
+        A:      (N, T, r) — predicted attention (already softmax-normalised over N).
+        gt_pos: index of the GT expert in the sampled pool.
+        device: torch device.
+
+    Returns:
+        Scalar loss — mean NLL over T tensor groups.
+    """
+    N, T, r = A.shape
+    A_avg = A.mean(dim=2)                                          # (N, T)
+    log_A = (A_avg + 1e-8).log()                                   # (N, T)
+    gt_targets = torch.full((T,), gt_pos, dtype=torch.long, device=device)
+    return F.nll_loss(log_A.T, gt_targets)                         # mean over T
+
+
+# ──────────────────────────────────────────────────────────────
+# Per-tensor KL loss (legacy, --target_mode kl)
 # ──────────────────────────────────────────────────────────────
 def compute_kl_loss(
     A: torch.Tensor,          # (N, T, r) — predicted attention
@@ -239,12 +284,20 @@ def train(args):
         weight_decay=args.weight_decay,
     )
 
+    # ── Validate args ─────────────────────────────────────────
+    if args.target_mode == "kl" and args.similarity_path is None:
+        raise ValueError(
+            "--similarity_path is required when --target_mode kl. "
+            "Use --target_mode ce (default) to train without a CLIP similarity file."
+        )
+
     # ── Dataset ───────────────────────────────────────────────
+    sim_path = args.similarity_path if args.target_mode == "kl" else None
     dataset = WikiArtStage1Dataset(
         pool=pool,
         wikiart_dir=args.wikiart_dir,
         label_map_path=args.label_map_path,
-        similarity_path=args.similarity_path,
+        similarity_path=sim_path,
         tau_label=args.tau_label,
         min_pool_size=args.min_pool_size,
         max_pool_size=args.max_pool_size,
@@ -278,11 +331,11 @@ def train(args):
         log_fh.flush()
 
     log(f"\n{'='*60}")
-    log(f"Stage 1 v2.0 Training  —  {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    log(f"Stage 1 v2.1 Training  —  {time.strftime('%Y-%m-%d %H:%M:%S')}")
     log(f"Pool: {pool.num_experts} experts")
     log(f"Encoder params: {n_params:,}")
     log(f"Tensor groups: {T}")
-    log(f"max_steps={args.max_steps}, lr={args.lr}, batch={args.batch_size}")
+    log(f"target_mode={args.target_mode}, max_steps={args.max_steps}, lr={args.lr}, batch={args.batch_size}")
     log(f"τ_label={args.tau_label}, pool ∈ [{args.min_pool_size}, {args.max_pool_size}]")
     log(f"Dataset size: {len(dataset)}")
     log(f"{'='*60}")
@@ -315,16 +368,20 @@ def train(args):
         for i in range(n_samples):
             image = batch["images"][i]
             pool_indices = batch["pool_indices"][i]
-            soft_target = batch["soft_targets"][i].to(device)  # (N,)
 
             # Encode with frozen CLIP
             q = model.encode_image(image, device)  # (1, clip_dim)
 
             # Forward: per-tensor attention (τ=1.0 at training)
-            A, _ = model.forward(q, pool_indices, temperature=1.0)  # A: (N, T, r)
+            A, _ = model.forward(q, pool_indices, temperature=1.0, product_space=True)  # A: (N, T, r)
 
-            # KL loss
-            loss_i = compute_kl_loss(A, soft_target)
+            # Loss — CE (default) or KL (legacy)
+            if args.target_mode == "ce":
+                gt_pos = batch["gt_positions"][i]
+                loss_i = compute_ce_loss(A, gt_pos, device)
+            else:
+                soft_target = batch["soft_targets"][i].to(device)  # (N,)
+                loss_i = compute_kl_loss(A, soft_target)
             batch_loss = batch_loss + loss_i
 
             # Track entropy for monitoring

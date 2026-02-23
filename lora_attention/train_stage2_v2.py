@@ -46,7 +46,7 @@ from torch.utils.data import DataLoader
 from torchvision import transforms
 
 # ── Path setup ──────────────────────────────────────────────
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).parents[1]))
 
 from lora_attention.models.lora_pool import LoRAPool
 from lora_attention.models.moe_lora_v2 import MoELoRAv2
@@ -365,8 +365,8 @@ def train(args):
         # ── CLIP encode (expects PIL) ──────────────────────
         q = model.encode_image(image, device)  # (1, clip_dim)
 
-        # ── MoELoRAv2 forward (per-tensor, τ=1.0) ─────────
-        A, synth_lora = model.forward(q, pool_indices, temperature=1.0)
+        # ── MoELoRAv2 forward (per-tensor, τ=1.0, product-space synth) ─────
+        A, synth_lora = model.forward(q, pool_indices, temperature=1.0, product_space=True)
         # A: (N, T, r) with grad_fn
 
         # ── Entropy regularisation ─────────────────────────

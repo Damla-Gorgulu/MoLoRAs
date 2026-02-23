@@ -30,7 +30,7 @@ from pathlib import Path
 import torch
 from PIL import Image
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).parents[1]))
 
 from lora_attention.models.lora_pool import LoRAPool
 from lora_attention.models.moe_lora_v2 import MoELoRAv2
@@ -134,6 +134,18 @@ def parse_args():
     p.add_argument("--hidden_dim", type=int, default=512)
     p.add_argument("--no_normalize_keys", action="store_true")
     p.add_argument("--style_alpha", type=float, default=1.0)
+    p.add_argument("--norm_match", action="store_true",
+                   help="Scale synth LoRA so its total Frobenius norm matches the "
+                        "mean real B-LoRA norm (~50). Makes style effect visible "
+                        "even when routing is near-uniform. The style direction is "
+                        "still determined by routing; only magnitude is forced to "
+                        "match a single real B-LoRA.")
+    p.add_argument("--product_synth", action="store_true",
+                   help="Use product-space synthesis (RECOMMENDED). "
+                        "Computes ΔW = Σ A_i*(W_up_i @ W_down_i) then decomposes "
+                        "back to LoRA via SVD. Fixes the O(N²) cross-term "
+                        "cancellation bug in the default parameter-averaging mode. "
+                        "Essential when routing is near-uniform over many experts.")
 
     # Attention
     p.add_argument("--temperature", type=float, default=0.1,
@@ -223,12 +235,18 @@ def main():
 
     # ── Route ─────────────────────────────────────────────────
     print(f"[Inference-v2] τ={args.temperature}, top_k={args.top_k}")
+    if args.product_synth:
+        print("[Inference-v2] Using PRODUCT-SPACE synthesis (correct, SVD-based)")
+    else:
+        print("[Inference-v2] Using PARAMETER-AVERAGING synthesis (legacy; cross-term bug)")
+
     with torch.no_grad():
         q = model.encode_image(style_image, device)
         A, synth_lora = model.forward(
             q, pool_indices,
             temperature=args.temperature,
             top_k=args.top_k,
+            product_space=args.product_synth,
         )  # A: (N, T, r)
 
     # ── Diagnostics ───────────────────────────────────────────
@@ -294,13 +312,36 @@ def main():
         pipeline.load_lora_into_unet(real_sd, None, pipeline.unet)
     else:
         synth_cpu = {k: v.detach().cpu() for k, v in synth_lora.items()}
-        inject_lora(
-            pipeline=pipeline,
-            style_state_dict=synth_cpu,
-            style_alpha=args.style_alpha,
-            content_lora_path=args.content_lora,
-            content_alpha=args.content_alpha,
-        )
+
+        # Optional norm-matching: rescale synth so total Frobenius norm equals a
+        # single real B-LoRA (~50). This makes the visual effect comparable to
+        # injecting a real B-LoRA. Style DIRECTION is still determined by routing;
+        # only magnitude is normalised. Useful to confirm injection works and see
+        # what style direction the routing is pushing toward.
+        alpha = args.style_alpha
+        if args.norm_match:
+            synth_total_norm = sum(
+                v.norm().item() ** 2 for v in synth_cpu.values()
+            ) ** 0.5
+            TARGET_NORM = 50.0  # empirical mean Frobenius norm of a real B-LoRA style block
+            if synth_total_norm > 1e-6:
+                nm_scale = TARGET_NORM / synth_total_norm
+                alpha = alpha * nm_scale
+                print(f"[Inference-v2] norm_match: synth_norm={synth_total_norm:.3f}, "
+                      f"scale={nm_scale:.3f}x, effective_alpha={alpha:.3f}")
+            else:
+                print("[Inference-v2] norm_match: synth_norm≈0, skipping scale")
+
+        if alpha > 0.0:
+            inject_lora(
+                pipeline=pipeline,
+                style_state_dict=synth_cpu,
+                style_alpha=alpha,
+                content_lora_path=args.content_lora,
+                content_alpha=args.content_alpha,
+            )
+        else:
+            print("[Inference-v2] style_alpha=0 — skipping LoRA injection (vanilla SDXL)")
 
     # ── Generate ──────────────────────────────────────────────
     generator = torch.Generator(device=device).manual_seed(args.seed)
