@@ -372,8 +372,8 @@ def train(args):
             # Encode with frozen CLIP
             q = model.encode_image(image, device)  # (1, clip_dim)
 
-            # Forward: per-tensor attention (τ=1.0 at training)
-            A, _ = model.forward(q, pool_indices, temperature=1.0, product_space=True)  # A: (N, T, r)
+            # Forward: routing attention only — skip synthesis to save GPU memory
+            A, _ = model.forward(q, pool_indices, temperature=1.0, synthesise=False)  # A: (N, T, r)
 
             # Loss — CE (default) or KL (legacy)
             if args.target_mode == "ce":

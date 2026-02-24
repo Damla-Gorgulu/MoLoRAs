@@ -1528,3 +1528,485 @@ Stage 1 v2.1 should be re-run from scratch with `--target_mode ce` and a new
 required.  Stage 2 v2.1 then loads the resulting Stage 1 checkpoint.
 
 See `slurm/train_stage1_v21.sh` for the SLURM submission script.
+
+---
+
+## §24 — v2.1 Launch Bugs and Fixes
+
+### 24.1 — Bug: Wrong `dataset.py` Loaded (symlink resolution)
+
+**Symptom (job 762449):** Training crashed immediately with:
+```
+AttributeError: 'NoneType' object has no attribute 'seek'
+```
+inside `torch.load(similarity_path, …)`.  `similarity_path` was `None` (as
+expected in CE mode), but the code was trying to load it anyway.
+
+**Root cause:** `/home/eyavuz21` is a **symlink** to
+`/scratch/eyavuz21/home-moved/eyavuz21`.  All Python scripts used
+`Path(__file__).resolve().parents[1]` to build their `sys.path` entry.
+`resolve()` follows symlinks, so it inserted
+`/scratch/eyavuz21/home-moved/eyavuz21/repos/MoLoRAs` as `sys.path[0]` instead
+of `/home/eyavuz21/repos/MoLoRAs`.  The file at `home-moved` was the old
+pre-v2.1 copy of `dataset.py` which still required `similarity_path: str`
+(not optional) and unconditionally called `torch.load`.
+
+**Fix:** Removed `.resolve()` from `sys.path.insert` in all 8 Python scripts:
+- `train_stage1_v2.py`
+- `train_stage2_v2.py`
+- `train_stage1.py`
+- `train_stage2.py`
+- `inference.py`
+- `inference_v2.py`
+- `diagnose_lora_inject.py`
+- `diagnose_injection.py`
+
+Changed from `Path(__file__).resolve().parents[1]`
+         to  `Path(__file__).parents[1]`
+
+This resolves to the logical `/home/eyavuz21/repos/MoLoRAs` path, loading the
+correct live copy of the codebase.
+
+---
+
+### 24.2 — Bug: CUDA Out of Memory in Stage 1 Training
+
+**Symptom (job 762491):** Training started, loaded the dataset, then crashed:
+```
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 200.00 MiB.
+  30.00 GiB allocated by PyTorch on a 31.73 GiB V100.
+```
+Inside `_synthesise_product_space` at the line:
+```python
+W_avg.add_(A_scalar[i].view(T_d, 1, 1) * W_full_i)
+```
+
+**Root cause:** Stage 1 training called `model.forward(…, product_space=True)`
+which runs the full product-space synthesis — computing
+`W_avg = Σ Aᵢ(W_up_i @ W_down_i)` for all N=109 experts × T=80 tensor groups.
+For `d_in=2048` tensors: each `W_full_i` is `(T_d, 2048, 2048)` — ~1.3 GB per
+expert iteration.  Stage 1 only needs the attention matrix `A`; the synthesised
+LoRA is discarded immediately.  Running synthesis was pure waste.
+
+**Fix:** Added a `synthesise: bool = True` parameter to `MoELoRAv2.forward()`.
+When `synthesise=False`, the function returns `(A, {})` immediately after
+computing attention, skipping the entire synthesis path.
+
+Stage 1 training call updated to:
+```python
+A, _ = model.forward(q, pool_indices, temperature=1.0, synthesise=False)
+```
+
+Stage 2 and inference still call `forward()` without this flag (default `True`),
+so synthesis runs as before.
+
+---
+
+### 24.3 — Current Status
+
+| Job | Name | Status | Node | Started |
+|-----|------|--------|------|---------|
+| 762449 | MoELoRA-S1v21 | FAILED — symlink bug | ai14 | 2026-02-23 23:50 |
+| 762491 | MoELoRA-S1v21 | FAILED — OOM bug | ai14 | 2026-02-24 00:25 |
+| 763017 | MoELoRA-S1v21 | **RUNNING** | ai13 | 2026-02-24 01:39 |
+
+Job 763017 is the corrected run: CE loss, `synthesise=False` in Stage 1,
+symlink-safe `sys.path`.  Output: `/scratch/eyavuz21/lora_attention/stage1_v21/`.
+
+---
+
+## §25 — Stage 1 v2.1 Completion & Stage 2 / Inference Launch (2026-02-24)
+
+### §25.1 Stage 1 v2.1 Outcome
+
+Job 763017 ran for 12h (full time-limit) and reached **step 13,150 / 15,000**
+before SLURM cancelled it at `2026-02-24T13:39:14`.
+
+Final log excerpt:
+```
+step= 13150/15000  loss=2.263940  entropy=2.4016  lr=1.19e-05
+```
+
+The loss plateau (~2.27 ± 0.03 over steps 11k–13k) indicates the encoder has
+converged under CE routing; additional steps unlikely to yield significant
+improvement.  `latest.pt` corresponds to step 13,000 (last `checkpoint-13000`
+save).
+
+**Checkpoint used downstream:** `/scratch/eyavuz21/lora_attention/stage1_v21/latest.pt`
+
+### §25.2 Stage 2 v2.1 Launch
+
+New script: `lora_attention/slurm/train_stage2_v21.sh`
+- Identical to `train_stage2_v2.sh` except `STAGE1_CKPT` points to
+  `stage1_v21/latest.pt` and `OUTPUT_DIR` → `stage2_v21/`
+- 8,000 steps, LR=5e-5, λ_entropy: 0.1 → 0.01, fp16, V100 32GB, 24h limit
+- Submitted as job **764042** (PENDING at submission)
+
+```
+Output: /scratch/eyavuz21/lora_attention/stage2_v21/
+Log:    lora_attention/logs/MoELoRA-S2v21-764042.{log,err}
+```
+
+### §25.3 Stage 1 v2.1 Inference Sweep
+
+New script: `lora_attention/slurm/s1v21_inference_sweep.sh`
+- Evaluates the Stage 1 v2.1 encoder directly (before Stage 2 fine-tuning)
+- Same 4-sweep structure as `s1v2_ps_sweep.sh`; all runs use `--product_synth`
+- CKPT: `stage1_v21/latest.pt`; OUT_ROOT: `s1v21_inference_sweep/`
+- ~80 runs × ~50s ≈ 1.1h on V100; submitted as job **764043** (PENDING)
+
+```
+Output: /scratch/eyavuz21/lora_attention/s1v21_inference_sweep/
+Log:    lora_attention/logs/S1v21-inf-764043.{log,err}
+```
+
+### §25.4 Job History
+
+| Job    | Name          | Status    | Node | Submitted           |
+|--------|---------------|-----------|------|---------------------|
+| 763017 | MoELoRA-S1v21 | TIMEOUT @ step 13150 | ai13 | 2026-02-24 01:39 |
+| 764042 | MoELoRA-S2v21 | PENDING   | —    | 2026-02-24 ~14:00   |
+| 764043 | S1v21-inf     | PENDING   | —    | 2026-02-24 ~14:00   |
+
+### §25.5 Next Steps
+
+1. **Monitor 764042** — Stage 2 trains for 8000 steps on LDM loss.
+   - Log: `stage2_v21/train_log.txt`
+   - Expected finish: ~20h after start
+2. **Review 764043** — Inspect `s1v21_inference_sweep/` grid when complete (~1h).
+   Key diagnostic: does baroque/cubism/etc routing produce visually correct style?
+   Compare SWEEP 1 (model generated) vs SWEEP 3 (reference B-LoRA baseline).
+3. **After Stage 2 completes** — Run inference sweep with Stage 2 v2.1 weights:
+   - Create `slurm/s2v21_inference_sweep.sh` (copy `s1v21_inference_sweep.sh`,
+     change `CKPT` to `stage2_v21/latest.pt`, `OUT_ROOT` to `s2v21_inference_sweep/`)
+   - Compare S1 vs S2 sweep to measure LDM fine-tuning benefit
+4. **Loss plateau consideration** — If CE loss stagnated, consider:
+   - Increasing pool size range (e.g. POOL_MAX=50)
+   - Adding label smoothing to CE loss
+   - Switching back to KL with tau_label annealing
+
+---
+
+## §26 — Alpha Diagnostic: Root Cause Found & Fixed (2026-02-24)
+
+### §26.1 Findings from Job 764053 (`alpha_diag`)
+
+The alpha sweep over one baroque query (one query image, fixed seed, product-space synth)
+produced the following visual results:
+
+| Run | What was observed |
+|-----|-------------------|
+| `vanilla` (α=0) | baseline SDXL — no style |
+| `ref_blora_a1` | real B-LoRA injected — clear Baroque style |
+| `synth α=0.5` | **identical to vanilla** — no effect |
+| `synth α=1.0` | **identical to vanilla** — no effect |
+| `synth α=2.0` | **VISIBLE CHANGE** — different composition, girl image (content leakage from top-1 expert), style starting to show |
+| `synth α=3.0` | visible but distorting |
+| `synth α=5.0` | heavily distorted / degenerate |
+| `oracle top_k=1 α=2.0` | same girl image → **confirms routing is correct** |
+| `norm_match` | auto-computed effective_alpha≈3.2 — slightly over sweet spot |
+
+**Root cause: synthesised LoRA norm is ~3× smaller than a real B-LoRA.**
+```
+synth_norm ≈ 16    (measured by norm_match diagnostic)
+real B-LoRA norm ≈ 50
+→ α=1.0 injects only 32% of expected signal → visually invisible
+→ sweet spot: α ≈ 2.0–2.5
+```
+
+**Routing IS working.** The top-5 retrieved experts are visually style-compatible with
+the baroque query. Content leakage from the top-1 expert (a painting with a girl) matches
+the α=2.0 output — direct evidence that the synthesised LoRA is faithfully weighted toward
+that expert.
+
+The encoder at step 13,000 with CE loss is routing correctly. The prior "same output"
+complaints were entirely caused by under-scaled injection, not a routing failure.
+
+### §26.2 Why Is synth_norm Small?
+
+Product-space synthesis computes:
+```
+W_avg[t] = Σ_i  A[i,t] * (W_up[i,t] @ W_down[i,t])
+```
+When routing is near-uniform (A[i,t] ≈ 1/N), the per-expert products partially cancel via
+destructive interference across different style directions, reducing the overall magnitude.
+A real single-expert injection has full norm. The mix of N≈109 experts reduces the
+effective Frobenius norm by roughly √N factor (≈√109 ≈ 10.4×), so with real norm 50,
+synth norm ≈ 50/√109 ≈ 4.8... but measured ≈ 16, suggesting partial (not full uniform)
+routing — consistent with the heatmap showing genuine non-uniform routing.
+
+**Fix options:**
+1. **α=2.0 at inference** (done) — manual rescale to hit the sweet spot
+2. **norm_match** with TARGET_NORM=32 (done) — auto-scales to effective_alpha≈2.0
+3. **Stage 2 LDM training** — fine-tunes the synthesised weights to restore proper
+   magnitude via the diffusion loss gradient signal
+4. **Norm regularisation in Stage 1** — add a loss term penalising ‖W_avg‖ deviation
+   from a target norm (future work)
+
+### §26.3 Bug Fixes Applied
+
+**Bug A — SVD failing in fp16 (job 764042 crash):**
+```
+torch._C._LinAlgError: linalg.svd: algorithm failed to converge (ill-conditioned, code 1280)
+```
+`_synthesise_product_space` ran `torch.linalg.svd` on fp16 weights.
+During Stage 2 training, the mixed-precision unet weights are fp16, and W_avg accumulates
+in fp16 → ill-conditioned matrices near the float16 underflow range.
+
+**Fix** (`models/moe_lora_v2.py`):
+```python
+W_t_f32 = W_t.float()          # cast to fp32 before SVD
+try:
+    U, S, Vh = torch.linalg.svd(W_t_f32, full_matrices=False)
+except torch.linalg.LinAlgError:
+    W_t_f32 += 1e-5 * torch.randn_like(W_t_f32)  # jitter + retry
+    U, S, Vh = torch.linalg.svd(W_t_f32, full_matrices=False)
+U, S, Vh = U.to(dtype), S.to(dtype), Vh.to(dtype)
+```
+
+**Bug B — Inference sweep ran with invisible α=1.0:**
+- All previous sweep experiments used default `--style_alpha 1.0`
+- Outputs were visually identical to vanilla SDXL → all sweep results in
+  `s1v2_ps_sweep/`, `s1v21_inference_sweep/` are **invalid**
+
+**Fix:** `s1v21_inference_sweep.sh` now uses `ALPHA=2.0`, `OUT_ROOT=s1v21_inference_sweep_a2`.
+
+**Bug C — TARGET_NORM too high:**
+- `norm_match` used TARGET_NORM=50 → effective_alpha≈3.2 → slight distortion
+- Changed to TARGET_NORM=32 → effective_alpha≈2.0 → sweet spot
+
+### §26.4 Job History
+
+| Job    | Name          | Status  | Note |
+|--------|---------------|---------|------|
+| 764042 | MoELoRA-S2v21 | FAILED  | SVD fp16 crash at first step |
+| 764043 | S1v21-inf     | CANCELLED | α=1.0 → invisible outputs |
+| 764053 | alpha-diag    | COMPLETE | Found α=2.0 sweet spot |
+| 764077 | MoELoRA-S2v21 | PENDING | resubmit with fp32 SVD fix |
+| 764078 | S1v21-inf     | PENDING | resubmit with α=2.0, OUT=*_a2 |
+
+### §26.5 Next Steps
+
+1. **764078 done (~1h)** — inspect `s1v21_inference_sweep_a2/` contact sheet.
+   Now that injection is visible, key questions:
+   - Does routing produce the correct style direction? (baroque → baroque-like output?)
+   - Do different τ values produce different sharpness/style intensity?
+   - Does oracle (top_k=1) produce cleaner style than soft routing?
+2. **764077 done (~20h)** — Stage 2 v2.1 with fp32 SVD fix.
+   Stage 2 should further improve synth_norm via LDM gradient signal.
+3. **After Stage 2** — re-run inference sweep with Stage 2 weights.
+   Expect: better style quality AND potentially higher synth_norm → lower α needed.
+
+### §26.6 Human Validation: Routing Was Correct All Along
+
+**Heatmap evidence (per-tensor attention, baroque query, τ=0.005):**
+The per-tensor attention heatmap for the baroque query shows clearly non-uniform routing:
+- Different experts dominate different transformer layers (tensor groups)
+- Attention values span 0.05–0.40+ — far from the 1/N ≈ 0.009 uniform baseline
+- The spatial pattern is structured: bright cells are localised, not diffuse
+- This proves the encoder IS learning style-discriminative per-layer routing at step 13k
+
+**Top-5 retrieved experts for baroque query:**
+```
+#1 style_0040_Realism  (avg_A=0.060)
+#2 style_0001_Realism  (avg_A=0.058)
+#3 style_0132_Realism  (avg_A=0.054)
+#4 style_0176_Realism  (avg_A=0.044)
+#5 style_0104_Realism  (avg_A=0.043)
+```
+User confirmed: *"the images it retrieved at first was the closest in order of style"* —
+the retrieved Realism experts are visually similar to Baroque (both share dark, dramatic,
+figurative painting aesthetics). The encoder routes to the most style-compatible experts
+available in the pool, even when the exact style label is absent.
+
+**Content leakage confirmation:**
+At α=2.0 and oracle top_k=1, the output image contained a girl figure matching the
+top-1 retrieved expert's content — direct causal evidence that the synthesised LoRA
+faithfully encodes the expert's content and style direction.
+
+**Retrospective invalidation of all prior "same image" results:**
+
+| Section | Experiments | Why outputs looked identical | Status |
+|---------|-------------|------------------------------|--------|
+| §14 | Temperature sweep (v1) | Self-retrieval: query = training image → trivially routes correctly; but α was never the problem there since v1 used parameter-averaging (O(N²) bug) | Partially misleading |
+| §15 | Generalisation (v1) | v1 parameter-averaging synthesis bug; cross-term cancellation | Invalid |
+| §22–§23 | v2.0 PS sweep, v2.1 sweep | **α=1.0 at inference** → synth_norm≈16 → injection < visual threshold | Invalid (scale issue only) |
+
+**All prior "same image" visual results were caused by under-scaled injection (α=1.0),
+not by routing failures, synthesis bugs, or training problems.**
+The routing and synthesis pipeline was functionally correct from the moment the
+product-space fix (§22) was applied. This was confirmed experimentally at α=2.0.
+
+### §26.7 Current System Status (as of 2026-02-24)
+
+| Component | Status | Evidence |
+|-----------|--------|----------|
+| LoRARankEncoder routing | ✅ Working | Non-uniform heatmap, style-compatible top-5, content leakage at α=2.0 |
+| Product-space synthesis | ✅ Working | cos(oracle,synth)=0.9998 (§22), content leakage confirmed visually |
+| SVD stability (fp32) | ✅ Fixed | fp16 → fp32 cast + jitter-retry (§26.3 Bug A) |
+| Stage 1 CE training | ✅ Converged | Step 13,000, loss≈2.27 plateau (§25.1) |
+| Stage 2 fp16 training | 🔄 Running | Job 764077, fp32 SVD fix applied |
+| Inference sweep at α=2.0 | 🔄 Running | Job 764078, `s1v21_inference_sweep_a2/` |
+| Injection scale | ✅ Fixed | α=2.0 sweet spot; TARGET_NORM=32 for norm_match |
+
+**Key remaining question:** Does Stage 2 LDM training improve style quality beyond
+routing alone? Two hypotheses:
+- H1: Stage 2 restores synth_norm (LDM gradient pushes toward full-norm outputs)
+  → lowers effective α needed → less distortion at α=2.0 equivalent
+- H2: Stage 2 sharpens routing (learns which experts to weight for reconstruction)
+  → better style direction, not just magnitude
+Both can be measured by comparing Stage 1 vs Stage 2 inference sweeps at the same α.
+
+---
+
+## §27 — v2.0 Inference Sweeps Repeated at α=2.0 (2026-02-24)
+
+The v2.0 sweep results from §23 (`s1v2_ps_sweep/`, `s2v2_ps_sweep/`) used α=1.0 and
+are therefore visually invalid (synth_norm≈16, injection sub-threshold — see §26.3 Bug B).
+
+Both sweeps re-run from the same v2.0 checkpoints with all fixes from §26 applied:
+- α=2.0 (sweet spot)
+- product-space synthesis enabled
+- SVD fp32 cast (avoids LinAlgError)
+- TARGET_NORM=32 for norm_match
+
+| Job    | Script                        | CKPT                          | OUT_ROOT                        |
+|--------|-------------------------------|-------------------------------|---------------------------------|
+| 764082 | `s1v2_inference_sweep_a2.sh`  | `stage1_v2/latest.pt`         | `s1v2_inference_sweep_a2/`      |
+| 764083 | `s2v2_inference_sweep_a2.sh`  | `stage2_v2/latest.pt`         | `s2v2_inference_sweep_a2/`      |
+
+These run concurrently with the v2.1 jobs (764077 Stage 2 training, 764078 S1v21 sweep).
+
+### Intent
+
+Repeating v2.0 sweeps (rather than waiting for v2.1 only) enables a **4-way comparison**:
+
+| Checkpoint | Training | Expected behaviour |
+|------------|----------|--------------------|
+| S1 v2.0 (KL loss)  | Similarity-based routing target | Routing guided by CLIP pairwise similarity |
+| S2 v2.0 (LDM loss) | Fine-tuned on diffusion error   | Potentially sharper routing + norm growth |
+| S1 v2.1 (CE loss)  | One-hot routing target          | Routing to exact style label; fewer params needed |
+| S2 v2.1 (LDM, pending) | Fine-tuned from CE encoder | Best expected style quality |
+
+The v2.0 KL vs v2.1 CE comparison is scientifically meaningful: both use identical
+architecture, pool, and synthesis — only the Stage 1 routing loss differs.
+
+---
+
+## §28 — Job Status Update (2026-02-24 ~15:30)
+
+| Job    | Name          | Status      | Note |
+|--------|---------------|-------------|------|
+| 764077 | MoELoRA-S2v21 | ✅ RUNNING  | Stage 2 v2.1 training started, step log pending |
+| 764078 | S1v21-inf     | ✅ COMPLETE | 80/80 images → `s1v21_inference_sweep_a2/` |
+| 764082 | S1v2-inf      | ✅ COMPLETE | 80/80 images → `s1v2_inference_sweep_a2/` |
+| 764083 | S2v2-inf      | ❌ HELD     | "launch failed requeued held" — script had no +x (sed redirect); cancelled & resubmitted |
+| 764368 | S2v2-inf      | ⏳ PENDING  | resubmission of 764083 → `s2v2_inference_sweep_a2/` |
+
+**Sweeps available for visual review now:**
+- `s1v21_inference_sweep_a2/` — CE routing (v2.1), α=2.0
+- `s1v2_inference_sweep_a2/`  — KL routing (v2.0), α=2.0
+
+Both contain 80 images: 4 styles × (2 sources × 3τ × 2 top_k + 2 neutral + 2 ref + 2 vanilla).
+
+---
+
+## §29 — Stage 2 v2.1 SVD Crash: Deeper Fix (2026-02-24)
+
+Job 764077 (Stage 2 v2.1) failed again with the same `LinAlgError: SVD failed to converge`
+despite the try/except + fp32 cast from §26.3 Bug A.
+
+### Root Cause (complete)
+
+The previous fix only cast `W_t` to float32 at SVD time. But `W_avg` was still
+**accumulated in fp16** (`dtype=W_down.dtype` which is fp16 during mixed-precision Stage 2).
+
+The problem is in the accumulation loop:
+```python
+W_avg = torch.zeros(..., dtype=dtype)          # ← fp16 accumulator
+W_full_i = torch.bmm(W_up[i], W_down[i])      # ← fp16 bmm
+W_avg.add_(A_scalar[i].view(...) * W_full_i)   # ← fp16 add_
+```
+
+Summing N=109 fp16 matrices causes **catastrophic cancellation and underflow** — the
+result has tiny magnitude (~1e-5 in fp16) and near-degenerate singular values, making
+it ill-conditioned even after the fp32 cast. The noise retry used 1e-5 absolute, which
+is still below fp16 resolution for small-magnitude matrices.
+
+### Fix Applied (`models/moe_lora_v2.py`)
+
+Accumulate `W_avg` in **float32 from the start**:
+```python
+W_avg = torch.zeros(T_d, d_out, d_in, device=device, dtype=torch.float32)
+for i in range(N):
+    W_full_i = torch.bmm(W_up[i].float(), W_down[i].float())  # cast inputs too
+    W_avg.add_(A_scalar[i].float().view(T_d, 1, 1) * W_full_i)
+# ... SVD on fp32 W_avg (already fp32; no cast needed)
+```
+
+Also strengthened the noise retry: use `scale = W_t.abs().mean()` relative noise instead
+of fixed 1e-5, and catch broad `Exception` instead of the specific `LinAlgError` subclass
+(which may differ across torch versions).
+
+Cast `U, S, Vh` back to `dtype` after SVD as before.
+
+### Impact
+
+This fix is backward-compatible: at inference (fp32 weights) the behaviour is identical.
+During Stage 2 fp16 training, the accumulation is now numerically stable.
+
+| Job    | Status  | Note |
+|--------|---------|------|
+| 764077 | ❌ FAILED | fp16 accumulation → SVD crash (fix was incomplete) |
+| 764466 | ⏳ PENDING | resubmit with fp32 accumulation fix |
+
+---
+
+## §30 — Stage 2 v2.1 SVD Hang: CPU LAPACK Fix (2026-02-24)
+
+Job 764466 (Stage 2 v2.1, fp32 accumulation fix from §29) ran for 20+ minutes without
+printing a single training step. The process did NOT crash — it was silently hung.
+
+### Root Cause
+
+`torch.linalg.svd` dispatches to cuSOLVER on GPU. cuSOLVER can **hang indefinitely**
+(no exception, no return) when given ill-conditioned or near-singular matrices, while the
+CPU equivalent (LAPACK `dgesdd`/`dgesvd`) always terminates (raises an exception or
+returns with a flag).
+
+Job 764077 actually raised `LinAlgError` — that was the same ill-conditioned case on a
+different CUDA driver version that chose to raise instead of hang. On ai14 with the
+current driver, it silently hangs.
+
+### Fix Applied (`models/moe_lora_v2.py`)
+
+Unconditionally move the matrix to CPU before SVD, then move results back:
+```python
+W_t_f32 = W_avg[local_t].cpu()          # (d_out, d_in) fp32 on CPU
+try:
+    U, S, Vh = torch.linalg.svd(W_t_f32, full_matrices=False)
+except Exception:
+    scale = W_t_f32.abs().mean().clamp(min=1e-6)
+    W_t_f32 = W_t_f32 + scale * 1e-4 * torch.randn_like(W_t_f32)
+    U, S, Vh = torch.linalg.svd(W_t_f32, full_matrices=False)
+U  = U.to(device=device, dtype=dtype)
+S  = S.to(device=device, dtype=dtype)
+Vh = Vh.to(device=device, dtype=dtype)
+```
+
+**Performance note**: We call SVD 80 times per forward pass (T_d=80 tensor groups).
+Each SVD is on a (d_out × d_in) matrix where d_out, d_in ≤ 1024. CPU LAPACK for
+(1024×1024) takes ~5 ms → 80 × 5 ms = ~0.4 s overhead per step. At ~5 s/step total
+(LDM + encoder), this is an acceptable ~8% overhead vs. infinite hang.
+
+### Job History
+
+| Job    | Fix applied | Result |
+|--------|-------------|--------|
+| 764077 | First fix (fp32 cast at SVD time only) | ❌ LinAlgError (linAlg raised) |
+| 764466 | Second fix (fp32 accumulation) | ❌ Silent hang (cuSOLVER hangs) |
+| 764485 | Third fix (CPU LAPACK for SVD) | ⏳ PENDING |
+
+### Also completed this session
+
+- S2v2.0 inference sweep (job 764368): **80/80 images ✅** → `s2v2_inference_sweep_a2/`

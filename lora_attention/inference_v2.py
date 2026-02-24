@@ -323,7 +323,8 @@ def main():
             synth_total_norm = sum(
                 v.norm().item() ** 2 for v in synth_cpu.values()
             ) ** 0.5
-            TARGET_NORM = 50.0  # empirical mean Frobenius norm of a real B-LoRA style block
+            TARGET_NORM = 32.0  # sweet-spot: synth_norm≈16 × 2× = 32 → effective_alpha≈2.0
+                                   # (at α>3 outputs become distorted; real B-LoRA norm≈50 is too high)
             if synth_total_norm > 1e-6:
                 nm_scale = TARGET_NORM / synth_total_norm
                 alpha = alpha * nm_scale
