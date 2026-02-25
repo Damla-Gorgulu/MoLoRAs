@@ -1,0 +1,109 @@
+# ============================================================
+# Linear Composition Experiment — Configuration
+# ============================================================
+
+# -- Paths --
+lora_pool_dir: /home/eyavuz21/repos/B-LoRA/blora_zoo/bloras
+style_images_dir: /home/eyavuz21/repos/B-LoRA/blora_zoo/style_images
+base_model_id: stabilityai/stable-diffusion-xl-base-1.0
+vae_model_id: madebyollin/sdxl-vae-fp16-fix
+experiment_dir: /scratch/dgorgulu21/mo-lora/MoLoRAs/experiments/linear_composition
+
+# -- LoRA conventions --
+lora_filename: pytorch_lora_weights.safetensors
+lora_rank: 64
+# B-LoRA zoo key format: *.lora.up.weight / *.lora.down.weight
+lora_up_suffix: ".lora.up.weight"
+lora_down_suffix: ".lora.down.weight"
+style_block_prefix: "unet.up_blocks.0.attentions.1"
+
+# -- Reproducibility --
+seed: 42
+regression_seed: 0
+precision_storage: float16
+precision_compute: float32
+precision_regression: float64
+
+# -- Image generation --
+prompt: "A painting of a riverside village at sunset"
+num_inference_steps: 30
+guidance_scale: 7.5
+lora_alpha: 2.0
+
+# -- Phase 1: Global regression --
+phase1:
+  num_representative_targets: 10
+  ridge_alphas: [0.01, 0.1, 1.0, 10.0]
+  lasso_alphas: [0.001, 0.01, 0.1]
+  elasticnet_alphas: [0.01, 0.1]
+  elasticnet_l1_ratios: [0.1, 0.5, 0.9]
+  sparsity_threshold: 1.0e-4
+  normalization_ablation: true
+
+# -- Phase 2: Layer-wise regression --
+phase2:
+  grouping_schemes:
+    A:
+      description: "Self-attention vs Cross-attention"
+      groups:
+        G1_self_attn:
+          description: "All self-attention (attn1)"
+          pattern: "attn1"
+        G2_cross_attn:
+          description: "All cross-attention (attn2)"
+          pattern: "attn2"
+    B:
+      description: "Early/Mid/Late × Attn type"
+      groups:
+        G3_early_self:
+          description: "Blocks 0-3, self-attention"
+          blocks: [0, 1, 2, 3]
+          attn: "attn1"
+        G4_early_cross:
+          description: "Blocks 0-3, cross-attention"
+          blocks: [0, 1, 2, 3]
+          attn: "attn2"
+        G5_mid_self:
+          description: "Blocks 4-6, self-attention"
+          blocks: [4, 5, 6]
+          attn: "attn1"
+        G6_mid_cross:
+          description: "Blocks 4-6, cross-attention"
+          blocks: [4, 5, 6]
+          attn: "attn2"
+        G7_late_self:
+          description: "Blocks 7-9, self-attention"
+          blocks: [7, 8, 9]
+          attn: "attn1"
+        G8_late_cross:
+          description: "Blocks 7-9, cross-attention"
+          blocks: [7, 8, 9]
+          attn: "attn2"
+    C:
+      description: "By projection type"
+      groups:
+        G9_query:
+          description: "to_q projections"
+          projection: "to_q"
+        G10_key:
+          description: "to_k projections"
+          projection: "to_k"
+        G11_value:
+          description: "to_v projections"
+          projection: "to_v"
+        G12_output:
+          description: "to_out.0 projections"
+          projection: "to_out"
+
+# -- Phase 3: Span analysis --
+phase3:
+  random_donor_ks: [5, 10, 20, 50, 108]
+  random_repeats: 5
+  energy_threshold: 0.90
+  span_thresholds:
+    in_span: 0.10
+    approx_in_span: 0.30
+    partial_in_span: 0.50
+
+# -- Logging --
+log_file: logs/experiment_log.json
