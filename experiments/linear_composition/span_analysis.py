@@ -84,28 +84,30 @@ def solve_ridge(X_donors, x_target, alpha):
 # Task 3.1: Full leave-one-out sweep
 # ================================================================
 
-def full_leave_one_out(matrix_np, styles, config, method, alpha):
+def full_leave_one_out(matrix_fp16, styles, config, method, alpha):
     """Run reconstruction for ALL N styles."""
     print("=" * 60)
     print("TASK 3.1 — Full leave-one-out sweep (all styles)")
     print("=" * 60)
 
-    N = matrix_np.shape[1]
+    N = matrix_fp16.shape[1]
     results = []
 
     t_total = time.time()
     for tidx in range(N):
         t0 = time.time()
 
-        x_target = matrix_np[:, tidx].copy()
+        # Cast per-iteration: ~186 GB peak (fp16 matrix + fp32 donors slice)
+        x_target = matrix_fp16[:, tidx].float().numpy()
         donor_cols = [i for i in range(N) if i != tidx]
-        X_donors = matrix_np[:, donor_cols].copy()
+        X_donors = matrix_fp16[:, donor_cols].float().numpy()
 
         w = solve_ridge(X_donors, x_target, alpha)
         x_recon = X_donors @ w
+        del X_donors  # free immediately
         elapsed = time.time() - t0
 
-        x_t = torch.from_numpy(x_target.astype(np.float32))
+        x_t = torch.from_numpy(x_target)
         x_r = torch.from_numpy(x_recon.astype(np.float32))
 
         metrics = compute_metrics(x_t, x_r, w)
@@ -177,7 +179,7 @@ def compute_distribution_stats(results):
 # Task 3.3: Random donor baseline
 # ================================================================
 
-def random_donor_baseline(matrix_np, target_indices, styles, config, alpha):
+def random_donor_baseline(matrix_fp16, target_indices, styles, config, alpha):
     """Test reconstruction with random subsets of k donors."""
     print("\n" + "=" * 60)
     print("TASK 3.3 — Random donor baseline")
@@ -186,22 +188,22 @@ def random_donor_baseline(matrix_np, target_indices, styles, config, alpha):
     cfg3 = config["phase3"]
     ks = cfg3["random_donor_ks"]
     repeats = cfg3["random_repeats"]
-    N = matrix_np.shape[1]
+    N = matrix_fp16.shape[1]
     rng = np.random.RandomState(config["regression_seed"])
 
     results = []
     for k in ks:
         for tidx in target_indices:
             all_donors = [i for i in range(N) if i != tidx]
+            x_target = matrix_fp16[:, tidx].float().numpy()
             for rep in range(repeats):
                 selected = rng.choice(all_donors, size=min(k, len(all_donors)), replace=False)
-                X_sel = matrix_np[:, selected].copy()
-                x_target = matrix_np[:, tidx].copy()
+                X_sel = matrix_fp16[:, selected.tolist()].float().numpy()
 
                 w = solve_ridge(X_sel, x_target, alpha)
                 x_recon = X_sel @ w
 
-                x_t = torch.from_numpy(x_target.astype(np.float32))
+                x_t = torch.from_numpy(x_target)
                 x_r = torch.from_numpy(x_recon.astype(np.float32))
                 err = relative_reconstruction_error(x_t, x_r)
                 cos = cosine_similarity(x_t, x_r)
@@ -226,26 +228,26 @@ def random_donor_baseline(matrix_np, target_indices, styles, config, alpha):
 # Task 3.4: Random tensor baseline
 # ================================================================
 
-def random_tensor_baseline(matrix_np, target_indices, styles, config, alpha):
+def random_tensor_baseline(matrix_fp16, target_indices, styles, config, alpha):
     """Replace donors with random vectors of matching norm."""
     print("\n" + "=" * 60)
     print("TASK 3.4 — Random tensor baseline")
     print("=" * 60)
 
-    N = matrix_np.shape[1]
-    D = matrix_np.shape[0]
+    N = matrix_fp16.shape[1]
+    D = matrix_fp16.shape[0]
     rng = np.random.RandomState(config["regression_seed"] + 42)
 
-    # Compute norms of real donors
-    donor_norms = np.linalg.norm(matrix_np, axis=0)
+    # Compute norms of real donors (from fp16 matrix)
+    donor_norms = matrix_fp16.float().norm(dim=0).numpy()
 
     results = []
     for tidx in target_indices:
-        x_target = matrix_np[:, tidx].copy()
+        x_target = matrix_fp16[:, tidx].float().numpy()
         donor_cols = [i for i in range(N) if i != tidx]
 
         # Generate random donors with matching norms
-        X_random = rng.randn(D, len(donor_cols)).astype(np.float64)
+        X_random = rng.randn(D, len(donor_cols)).astype(np.float32)
         for j, dcol in enumerate(donor_cols):
             col_norm = np.linalg.norm(X_random[:, j])
             if col_norm > 1e-12:
@@ -254,7 +256,7 @@ def random_tensor_baseline(matrix_np, target_indices, styles, config, alpha):
         w = solve_ridge(X_random, x_target, alpha)
         x_recon = X_random @ w
 
-        x_t = torch.from_numpy(x_target.astype(np.float32))
+        x_t = torch.from_numpy(x_target)
         x_r = torch.from_numpy(x_recon.astype(np.float32))
         err = relative_reconstruction_error(x_t, x_r)
         cos = cosine_similarity(x_t, x_r)
@@ -589,8 +591,11 @@ def main():
     method, alpha, _ = load_best_method(config)
     print(f"  Method: {method}, alpha={alpha}")
 
-    # Convert to numpy
-    matrix_np = matrix.numpy().astype(np.float64)
+    # Keep matrix as fp16 torch tensor.
+    # Each function casts only its needed slice to float32 per-iteration.
+    # Peak memory: ~62 GB (fp16) + ~123 GB (one LOO slice fp32) = ~185 GB.
+    matrix_fp16 = matrix
+    del matrix
 
     all_results = None
     random_donor_results = None
@@ -599,7 +604,7 @@ def main():
 
     # ── Task 3.1: Full sweep ──
     if args.full_sweep:
-        all_results = full_leave_one_out(matrix_np, styles, config, method, alpha)
+        all_results = full_leave_one_out(matrix_fp16, styles, config, method, alpha)
 
         # Save (without coefficients in main file for size)
         results_no_coeff = [{k: v for k, v in r.items() if k != "coefficients"} for r in all_results]
@@ -646,15 +651,15 @@ def main():
         else:
             target_indices = list(range(min(10, N)))
 
-        random_donor_results = random_donor_baseline(matrix_np, target_indices, styles, config, alpha)
+        random_donor_results = random_donor_baseline(matrix_fp16, target_indices, styles, config, alpha)
         save_json(random_donor_results, exp_dir / "results" / "phase3" / "random_donor_baseline.json")
 
-        random_tensor_results = random_tensor_baseline(matrix_np, target_indices, styles, config, alpha)
+        random_tensor_results = random_tensor_baseline(matrix_fp16, target_indices, styles, config, alpha)
         save_json(random_tensor_results, exp_dir / "results" / "phase3" / "random_tensor_baseline.json")
 
     # ── Task 3.7: SVD ──
     if args.svd:
-        svd_data = svd_spectrum_analysis(matrix, config)
+        svd_data = svd_spectrum_analysis(matrix_fp16, config)
         save_json(svd_data, exp_dir / "results" / "phase3" / "svd_spectrum.json")
 
     # ── Plots ──

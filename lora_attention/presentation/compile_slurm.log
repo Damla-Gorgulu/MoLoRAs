@@ -1,0 +1,776 @@
+[compile] Compiling with tectonic (downloads missing packages automatically)...
+note: "version 2" Tectonic command-line interface activated
+note: Running TeX ...
+warning: slides.tex:92: Missing character: There is no 5 ("35) in font nullfont!
+warning: could not represent character "5" (0x35) in font "nullfont"
+warning:   you may need to load the `fontspec` package and use (e.g.) \setmainfont to
+warning:   choose a different font that covers the unrepresentable character(s)
+warning: slides.tex:146: 
+Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:146: Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:146: Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:146: Missing character: There is no 7 ("37) in font nullfont!
+warning: could not represent character "7" (0x37) in font "nullfont"
+warning: slides.tex:146: Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:146: Missing character: There is no 3 ("33) in font nullfont!
+warning: could not represent character "3" (0x33) in font "nullfont"
+warning: slides.tex:248: 
+Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:248: Missing character: There is no 8 ("38) in font nullfont!
+warning: could not represent character "8" (0x38) in font "nullfont"
+warning: slides.tex:248: Missing character: There is no 3 ("33) in font nullfont!
+warning: could not represent character "3" (0x33) in font "nullfont"
+warning: slides.tex:248: Missing character: There is no 3 ("33) in font nullfont!
+warning: could not represent character "3" (0x33) in font "nullfont"
+warning: slides.tex:248: Missing character: There is no 3 ("33) in font nullfont!
+warning: could not represent character "3" (0x33) in font "nullfont"
+warning: slides.tex:248: Missing character: There is no 8 ("38) in font nullfont!
+warning: could not represent character "8" (0x38) in font "nullfont"
+warning: slides.tex:290: 
+Missing character: There is no 4 ("34) in font nullfont!
+warning: could not represent character "4" (0x34) in font "nullfont"
+warning: slides.tex:290: Missing character: There is no 3 ("33) in font nullfont!
+warning: could not represent character "3" (0x33) in font "nullfont"
+warning: slides.tex:290: Missing character: There is no 4 ("34) in font nullfont!
+warning: could not represent character "4" (0x34) in font "nullfont"
+warning: slides.tex:290: Missing character: There is no 8 ("38) in font nullfont!
+warning: could not represent character "8" (0x38) in font "nullfont"
+warning: slides.tex:290: Missing character: There is no 5 ("35) in font nullfont!
+warning: could not represent character "5" (0x35) in font "nullfont"
+warning: slides.tex:290: Missing character: There is no 4 ("34) in font nullfont!
+warning: could not represent character "4" (0x34) in font "nullfont"
+warning: slides.tex:337: 
+Missing character: There is no 5 ("35) in font nullfont!
+warning: could not represent character "5" (0x35) in font "nullfont"
+warning: slides.tex:337: Missing character: There is no 9 ("39) in font nullfont!
+warning: could not represent character "9" (0x39) in font "nullfont"
+warning: slides.tex:337: Missing character: There is no 6 ("36) in font nullfont!
+warning: could not represent character "6" (0x36) in font "nullfont"
+warning: slides.tex:337: Missing character: There is no 4 ("34) in font nullfont!
+warning: could not represent character "4" (0x34) in font "nullfont"
+warning: slides.tex:337: Missing character: There is no 6 ("36) in font nullfont!
+warning: could not represent character "6" (0x36) in font "nullfont"
+warning: slides.tex:337: Missing character: There is no 9 ("39) in font nullfont!
+warning: could not represent character "9" (0x39) in font "nullfont"
+warning: slides.tex:386: 
+Missing character: There is no 7 ("37) in font nullfont!
+warning: could not represent character "7" (0x37) in font "nullfont"
+warning: slides.tex:386: Missing character: There is no 4 ("34) in font nullfont!
+warning: could not represent character "4" (0x34) in font "nullfont"
+warning: slides.tex:386: Missing character: There is no 8 ("38) in font nullfont!
+warning: could not represent character "8" (0x38) in font "nullfont"
+warning: slides.tex:386: Missing character: There is no 0 ("30) in font nullfont!
+warning: could not represent character "0" (0x30) in font "nullfont"
+warning: slides.tex:386: Missing character: There is no 8 ("38) in font nullfont!
+warning: could not represent character "8" (0x38) in font "nullfont"
+warning: slides.tex:386: Missing character: There is no 5 ("35) in font nullfont!
+warning: could not represent character "5" (0x35) in font "nullfont"
+warning: slides.tex:386: Missing character: There is no 9 ("39) in font nullfont!
+warning: could not represent character "9" (0x39) in font "nullfont"
+warning: slides.tex:386: Missing character: There is no 0 ("30) in font nullfont!
+warning: could not represent character "0" (0x30) in font "nullfont"
+warning: slides.tex:461: 
+Missing character: There is no 9 ("39) in font nullfont!
+warning: could not represent character "9" (0x39) in font "nullfont"
+warning: slides.tex:461: Missing character: There is no 5 ("35) in font nullfont!
+warning: could not represent character "5" (0x35) in font "nullfont"
+warning: slides.tex:461: Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:461: Missing character: There is no 0 ("30) in font nullfont!
+warning: could not represent character "0" (0x30) in font "nullfont"
+warning: slides.tex:461: Missing character: There is no 0 ("30) in font nullfont!
+warning: could not represent character "0" (0x30) in font "nullfont"
+warning: slides.tex:461: Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:461: Missing character: There is no 0 ("30) in font nullfont!
+warning: could not represent character "0" (0x30) in font "nullfont"
+warning: slides.tex:461: Missing character: There is no 5 ("35) in font nullfont!
+warning: could not represent character "5" (0x35) in font "nullfont"
+warning: slides.tex:521: 
+Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:521: Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:521: Missing character: There is no 0 ("30) in font nullfont!
+warning: could not represent character "0" (0x30) in font "nullfont"
+warning: slides.tex:521: Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:521: Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:521: Missing character: There is no 5 ("35) in font nullfont!
+warning: could not represent character "5" (0x35) in font "nullfont"
+warning: slides.tex:521: Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:521: Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:521: Missing character: There is no 0 ("30) in font nullfont!
+warning: could not represent character "0" (0x30) in font "nullfont"
+warning: slides.tex:521: Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:521: Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:521: Missing character: There is no 5 ("35) in font nullfont!
+warning: could not represent character "5" (0x35) in font "nullfont"
+warning: slides.tex:651: 
+Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:651: Missing character: There is no 3 ("33) in font nullfont!
+warning: could not represent character "3" (0x33) in font "nullfont"
+warning: slides.tex:651: Missing character: There is no 0 ("30) in font nullfont!
+warning: could not represent character "0" (0x30) in font "nullfont"
+warning: slides.tex:651: Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:651: Missing character: There is no 3 ("33) in font nullfont!
+warning: could not represent character "3" (0x33) in font "nullfont"
+warning: slides.tex:651: Missing character: There is no 5 ("35) in font nullfont!
+warning: could not represent character "5" (0x35) in font "nullfont"
+warning: slides.tex:651: Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:651: Missing character: There is no 4 ("34) in font nullfont!
+warning: could not represent character "4" (0x34) in font "nullfont"
+warning: slides.tex:651: Missing character: There is no 0 ("30) in font nullfont!
+warning: could not represent character "0" (0x30) in font "nullfont"
+warning: slides.tex:712: 
+Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:712: Missing character: There is no 4 ("34) in font nullfont!
+warning: could not represent character "4" (0x34) in font "nullfont"
+warning: slides.tex:712: Missing character: There is no 5 ("35) in font nullfont!
+warning: could not represent character "5" (0x35) in font "nullfont"
+warning: slides.tex:712: Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:712: Missing character: There is no 5 ("35) in font nullfont!
+warning: could not represent character "5" (0x35) in font "nullfont"
+warning: slides.tex:712: Missing character: There is no 0 ("30) in font nullfont!
+warning: could not represent character "0" (0x30) in font "nullfont"
+warning: slides.tex:779: 
+Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:779: Missing character: There is no 5 ("35) in font nullfont!
+warning: could not represent character "5" (0x35) in font "nullfont"
+warning: slides.tex:779: Missing character: There is no 5 ("35) in font nullfont!
+warning: could not represent character "5" (0x35) in font "nullfont"
+warning: slides.tex:779: Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:779: Missing character: There is no 6 ("36) in font nullfont!
+warning: could not represent character "6" (0x36) in font "nullfont"
+warning: slides.tex:779: Missing character: There is no 0 ("30) in font nullfont!
+warning: could not represent character "0" (0x30) in font "nullfont"
+warning: accessing absolute path `/scratch/eyavuz21/lora_attention/alpha_diag/vanilla/vanilla_A_Baroque_painting_0.jpg`; build may not be reproducible in other environments
+warning: accessing absolute path `/scratch/eyavuz21/lora_attention/alpha_diag/synth_t0.005_a1.0/synth_t0.005_a1.0_A_Baroque_painting_0.jpg`; build may not be reproducible in other environments
+warning: slides.tex:779: Missing character: There is no ��� (U+2713) in font [lmsans10-bold]:mapping=tex-text;!
+warning: could not represent character "✓" (0x2713) in font "[lmsans10-bold]:mapping=tex-text;"
+warning: accessing absolute path `/scratch/eyavuz21/lora_attention/alpha_diag/synth_t0.005_a2.0/synth_t0.005_a2.0_A_Baroque_painting_0.jpg`; build may not be reproducible in other environments
+warning: accessing absolute path `/scratch/eyavuz21/lora_attention/alpha_diag/synth_oracle_a3.0/synth_oracle_a3.0_A_Baroque_painting_0.jpg`; build may not be reproducible in other environments
+warning: accessing absolute path `/scratch/eyavuz21/lora_attention/alpha_diag/synth_t0.005_a5.0/synth_t0.005_a5.0_A_Baroque_painting_0.jpg`; build may not be reproducible in other environments
+warning: accessing absolute path `/scratch/eyavuz21/lora_attention/alpha_diag/ref_blora_a1/ref_blora_a1_A_Baroque_painting_0.jpg`; build may not be reproducible in other environments
+warning: slides.tex:818: 
+Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:818: Missing character: There is no 6 ("36) in font nullfont!
+warning: could not represent character "6" (0x36) in font "nullfont"
+warning: slides.tex:818: Missing character: There is no 5 ("35) in font nullfont!
+warning: could not represent character "5" (0x35) in font "nullfont"
+warning: slides.tex:818: Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:818: Missing character: There is no 7 ("37) in font nullfont!
+warning: could not represent character "7" (0x37) in font "nullfont"
+warning: slides.tex:818: Missing character: There is no 0 ("30) in font nullfont!
+warning: could not represent character "0" (0x30) in font "nullfont"
+warning: accessing absolute path `/scratch/eyavuz21/lora_attention/s1v21_inference_sweep_a2/baroque/pool/ps_t0.005_knone/baroque_pool_ps_t0.005_knone_A_Baroque_painting_heatmap.png`; build may not be reproducible in other environments
+warning: accessing absolute path `/scratch/eyavuz21/lora_attention/s1v21_inference_sweep_a2/baroque/pool/ps_t0.005_knone/baroque_pool_ps_t0.005_knone_A_Baroque_painting_0.jpg`; build may not be reproducible in other environments
+warning: slides.tex:856: 
+Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:856: Missing character: There is no 7 ("37) in font nullfont!
+warning: could not represent character "7" (0x37) in font "nullfont"
+warning: slides.tex:856: Missing character: There is no 6 ("36) in font nullfont!
+warning: could not represent character "6" (0x36) in font "nullfont"
+warning: slides.tex:856: Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:856: Missing character: There is no 8 ("38) in font nullfont!
+warning: could not represent character "8" (0x38) in font "nullfont"
+warning: slides.tex:856: Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: accessing absolute path `/scratch/eyavuz21/lora_attention/s1v21_inference_sweep_a2/baroque/pool/ps_t0.005_knone/baroque_pool_ps_t0.005_knone___query.jpg`; build may not be reproducible in other environments
+warning: accessing absolute path `/scratch/eyavuz21/lora_attention/s1v21_inference_sweep_a2/baroque/pool/ps_t0.005_knone/baroque_pool_ps_t0.005_knone___top1_style_0014_Northern_Renaissance.jpg`; build may not be reproducible in other environments
+warning: accessing absolute path `/scratch/eyavuz21/lora_attention/s2v2_inference_sweep_a2/baroque/pool/ps_t0.005_knone/baroque_pool_ps_t0.005_knone___query.jpg`; build may not be reproducible in other environments
+warning: accessing absolute path `/scratch/eyavuz21/lora_attention/s2v2_inference_sweep_a2/baroque/pool/ps_t0.005_knone/baroque_pool_ps_t0.005_knone_A_Baroque_painting_0.jpg`; build may not be reproducible in other environments
+warning: accessing absolute path `/scratch/eyavuz21/lora_attention/s2v2_inference_sweep_a2/baroque/pool/ps_t0.005_knone/baroque_pool_ps_t0.005_knone___top1_style_0084_Early_Renaissance.jpg`; build may not be reproducible in other environments
+warning: accessing absolute path `/scratch/eyavuz21/lora_attention/s1v21_inference_sweep_a2/cubism/pool/ps_t0.005_knone/cubism_pool_ps_t0.005_knone___query.jpg`; build may not be reproducible in other environments
+warning: accessing absolute path `/scratch/eyavuz21/lora_attention/s1v21_inference_sweep_a2/cubism/pool/ps_t0.005_knone/cubism_pool_ps_t0.005_knone_A_Cubism_painting_0.jpg`; build may not be reproducible in other environments
+warning: accessing absolute path `/scratch/eyavuz21/lora_attention/s1v21_inference_sweep_a2/cubism/pool/ps_t0.005_knone/cubism_pool_ps_t0.005_knone___top1_style_0046_Naive_Art_Primitivism.jpg`; build may not be reproducible in other environments
+warning: accessing absolute path `/scratch/eyavuz21/lora_attention/s1v21_inference_sweep_a2/impressionism/pool/ps_t0.005_knone/impressionism_pool_ps_t0.005_knone___query.jpg`; build may not be reproducible in other environments
+warning: accessing absolute path `/scratch/eyavuz21/lora_attention/s1v21_inference_sweep_a2/impressionism/pool/ps_t0.005_knone/impressionism_pool_ps_t0.005_knone_An_Impressionism_painting_0.jpg`; build may not be reproducible in other environments
+warning: accessing absolute path `/scratch/eyavuz21/lora_attention/s1v21_inference_sweep_a2/impressionism/pool/ps_t0.005_knone/impressionism_pool_ps_t0.005_knone___top1_style_0152_Impressionism.jpg`; build may not be reproducible in other environments
+warning: accessing absolute path `/scratch/eyavuz21/lora_attention/s1v21_inference_sweep_a2/expressionism/pool/ps_t0.005_knone/expressionism_pool_ps_t0.005_knone___query.jpg`; build may not be reproducible in other environments
+warning: accessing absolute path `/scratch/eyavuz21/lora_attention/s1v21_inference_sweep_a2/expressionism/pool/ps_t0.005_knone/expressionism_pool_ps_t0.005_knone_An_Expressionism_painting_0.jpg`; build may not be reproducible in other environments
+warning: accessing absolute path `/scratch/eyavuz21/lora_attention/s1v21_inference_sweep_a2/expressionism/pool/ps_t0.005_knone/expressionism_pool_ps_t0.005_knone___top1_style_0126_Symbolism.jpg`; build may not be reproducible in other environments
+warning: accessing absolute path `/scratch/eyavuz21/lora_attention/s2v2_inference_sweep_a2/expressionism/pool/ps_t0.005_knone/expressionism_pool_ps_t0.005_knone___query.jpg`; build may not be reproducible in other environments
+warning: accessing absolute path `/scratch/eyavuz21/lora_attention/s2v2_inference_sweep_a2/expressionism/pool/ps_t0.005_knone/expressionism_pool_ps_t0.005_knone_An_Expressionism_painting_0.jpg`; build may not be reproducible in other environments
+warning: accessing absolute path `/scratch/eyavuz21/lora_attention/s2v2_inference_sweep_a2/expressionism/pool/ps_t0.005_knone/expressionism_pool_ps_t0.005_knone___top1_style_0048_Abstract_Expressionism.jpg`; build may not be reproducible in other environments
+warning: slides.tex:1024: 
+Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:1024: Missing character: There is no 8 ("38) in font nullfont!
+warning: could not represent character "8" (0x38) in font "nullfont"
+warning: slides.tex:1024: Missing character: There is no 6 ("36) in font nullfont!
+warning: could not represent character "6" (0x36) in font "nullfont"
+warning: slides.tex:1024: Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:1024: Missing character: There is no 9 ("39) in font nullfont!
+warning: could not represent character "9" (0x39) in font "nullfont"
+warning: slides.tex:1024: Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: accessing absolute path `/scratch/eyavuz21/lora_attention/s1v21_inference_sweep_a2/cubism/pool/ps_t0.005_knone/cubism_pool_ps_t0.005_knone_A_Cubism_painting_heatmap.png`; build may not be reproducible in other environments
+warning: accessing absolute path `/scratch/eyavuz21/lora_attention/s1v21_inference_sweep_a2/expressionism/pool/ps_t0.005_knone/expressionism_pool_ps_t0.005_knone_An_Expressionism_painting_heatmap.png`; build may not be reproducible in other environments
+warning: accessing absolute path `/scratch/eyavuz21/lora_attention/s1v21_inference_sweep_a2/impressionism/pool/ps_t0.005_knone/impressionism_pool_ps_t0.005_knone_An_Impressionism_painting_heatmap.png`; build may not be reproducible in other environments
+warning: slides.tex:1065: 
+Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:1065: Missing character: There is no 9 ("39) in font nullfont!
+warning: could not represent character "9" (0x39) in font "nullfont"
+warning: slides.tex:1065: Missing character: There is no 6 ("36) in font nullfont!
+warning: could not represent character "6" (0x36) in font "nullfont"
+warning: accessing absolute path `/scratch/eyavuz21/lora_attention/s1v21_inference_sweep_a2/baroque/pool/ps_t0.005_k1/baroque_pool_ps_t0.005_k1_A_Baroque_painting_0.jpg`; build may not be reproducible in other environments
+warning: accessing absolute path `/scratch/eyavuz21/lora_attention/s1v21_inference_sweep_a2/baroque/pool/ps_t0.5_knone/baroque_pool_ps_t0.5_knone_A_Baroque_painting_0.jpg`; build may not be reproducible in other environments
+warning: slides.tex:1086: 
+Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:1086: Missing character: There is no 0 ("30) in font nullfont!
+warning: could not represent character "0" (0x30) in font "nullfont"
+warning: slides.tex:1086: Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:1112: 
+Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:1112: Missing character: There is no 0 ("30) in font nullfont!
+warning: could not represent character "0" (0x30) in font "nullfont"
+warning: slides.tex:1112: Missing character: There is no 6 ("36) in font nullfont!
+warning: could not represent character "6" (0x36) in font "nullfont"
+warning: slides.tex:1166: 
+Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:1166: Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:1166: Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:1166: Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:1166: Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:1166: Missing character: There is no 6 ("36) in font nullfont!
+warning: could not represent character "6" (0x36) in font "nullfont"
+warning: slides.tex:1213: 
+Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:1213: Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:1213: Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:1213: Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:1213: Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:1213: Missing character: There is no 6 ("36) in font nullfont!
+warning: could not represent character "6" (0x36) in font "nullfont"
+warning: slides.tex:1213: Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:1213: Missing character: There is no 3 ("33) in font nullfont!
+warning: could not represent character "3" (0x33) in font "nullfont"
+warning: slides.tex:1213: Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:1213: Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:1213: Missing character: There is no 3 ("33) in font nullfont!
+warning: could not represent character "3" (0x33) in font "nullfont"
+warning: slides.tex:1213: Missing character: There is no 7 ("37) in font nullfont!
+warning: could not represent character "7" (0x37) in font "nullfont"
+warning: slides.tex:1213: Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:1213: Missing character: There is no 4 ("34) in font nullfont!
+warning: could not represent character "4" (0x34) in font "nullfont"
+warning: slides.tex:1213: Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:1247: 
+Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:1247: Missing character: There is no 4 ("34) in font nullfont!
+warning: could not represent character "4" (0x34) in font "nullfont"
+warning: slides.tex:1247: Missing character: There is no 7 ("37) in font nullfont!
+warning: could not represent character "7" (0x37) in font "nullfont"
+warning: slides.tex:1247: Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:1247: Missing character: There is no 5 ("35) in font nullfont!
+warning: could not represent character "5" (0x35) in font "nullfont"
+warning: slides.tex:1247: Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:1247: Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:1247: Missing character: There is no 5 ("35) in font nullfont!
+warning: could not represent character "5" (0x35) in font "nullfont"
+warning: slides.tex:1247: Missing character: There is no 7 ("37) in font nullfont!
+warning: could not represent character "7" (0x37) in font "nullfont"
+warning: slides.tex:1247: Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:1247: Missing character: There is no 6 ("36) in font nullfont!
+warning: could not represent character "6" (0x36) in font "nullfont"
+warning: slides.tex:1247: Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:1285: 
+Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:1285: Missing character: There is no 6 ("36) in font nullfont!
+warning: could not represent character "6" (0x36) in font "nullfont"
+warning: slides.tex:1285: Missing character: There is no 7 ("37) in font nullfont!
+warning: could not represent character "7" (0x37) in font "nullfont"
+warning: slides.tex:1285: Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:1285: Missing character: There is no 7 ("37) in font nullfont!
+warning: could not represent character "7" (0x37) in font "nullfont"
+warning: slides.tex:1285: Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:1285: Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:1285: Missing character: There is no 7 ("37) in font nullfont!
+warning: could not represent character "7" (0x37) in font "nullfont"
+warning: slides.tex:1285: Missing character: There is no 7 ("37) in font nullfont!
+warning: could not represent character "7" (0x37) in font "nullfont"
+warning: slides.tex:1329: 
+Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:1329: Missing character: There is no 8 ("38) in font nullfont!
+warning: could not represent character "8" (0x38) in font "nullfont"
+warning: slides.tex:1329: Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:1329: Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:1329: Missing character: There is no 8 ("38) in font nullfont!
+warning: could not represent character "8" (0x38) in font "nullfont"
+warning: slides.tex:1329: Missing character: There is no 7 ("37) in font nullfont!
+warning: could not represent character "7" (0x37) in font "nullfont"
+warning: slides.tex:1329: Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:1329: Missing character: There is no 9 ("39) in font nullfont!
+warning: could not represent character "9" (0x39) in font "nullfont"
+warning: slides.tex:1329: Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:1329: Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:1329: Missing character: There is no 9 ("39) in font nullfont!
+warning: could not represent character "9" (0x39) in font "nullfont"
+warning: slides.tex:1329: Missing character: There is no 7 ("37) in font nullfont!
+warning: could not represent character "7" (0x37) in font "nullfont"
+warning: slides.tex:1397: 
+Missing character: There is no 3 ("33) in font nullfont!
+warning: could not represent character "3" (0x33) in font "nullfont"
+warning: slides.tex:1397: Missing character: There is no 0 ("30) in font nullfont!
+warning: could not represent character "0" (0x30) in font "nullfont"
+warning: slides.tex:1397: Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:1397: Missing character: There is no 3 ("33) in font nullfont!
+warning: could not represent character "3" (0x33) in font "nullfont"
+warning: slides.tex:1397: Missing character: There is no 0 ("30) in font nullfont!
+warning: could not represent character "0" (0x30) in font "nullfont"
+warning: slides.tex:1397: Missing character: There is no 7 ("37) in font nullfont!
+warning: could not represent character "7" (0x37) in font "nullfont"
+warning: slides.tex:1442: 
+Missing character: There is no 3 ("33) in font nullfont!
+warning: could not represent character "3" (0x33) in font "nullfont"
+warning: slides.tex:1442: Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:1442: Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:1442: Missing character: There is no 3 ("33) in font nullfont!
+warning: could not represent character "3" (0x33) in font "nullfont"
+warning: slides.tex:1442: Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:1442: Missing character: There is no 7 ("37) in font nullfont!
+warning: could not represent character "7" (0x37) in font "nullfont"
+warning: slides.tex:1442: Missing character: There is no 3 ("33) in font nullfont!
+warning: could not represent character "3" (0x33) in font "nullfont"
+warning: slides.tex:1442: Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:1442: Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+note: Rerunning TeX because "slides.toc" changed ...
+warning: slides.tex:92: 
+Missing character: There is no 5 ("35) in font nullfont!
+warning: could not represent character "5" (0x35) in font "nullfont"
+warning:   you may need to load the `fontspec` package and use (e.g.) \setmainfont to
+warning:   choose a different font that covers the unrepresentable character(s)
+warning: slides.tex:146: 
+Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:146: Missing character: There is no 3 ("33) in font nullfont!
+warning: could not represent character "3" (0x33) in font "nullfont"
+warning: slides.tex:146: Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:146: Missing character: There is no 8 ("38) in font nullfont!
+warning: could not represent character "8" (0x38) in font "nullfont"
+warning: slides.tex:146: Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:146: Missing character: There is no 4 ("34) in font nullfont!
+warning: could not represent character "4" (0x34) in font "nullfont"
+warning: slides.tex:248: 
+Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:248: Missing character: There is no 9 ("39) in font nullfont!
+warning: could not represent character "9" (0x39) in font "nullfont"
+warning: slides.tex:248: Missing character: There is no 3 ("33) in font nullfont!
+warning: could not represent character "3" (0x33) in font "nullfont"
+warning: slides.tex:248: Missing character: There is no 4 ("34) in font nullfont!
+warning: could not represent character "4" (0x34) in font "nullfont"
+warning: slides.tex:248: Missing character: There is no 3 ("33) in font nullfont!
+warning: could not represent character "3" (0x33) in font "nullfont"
+warning: slides.tex:248: Missing character: There is no 9 ("39) in font nullfont!
+warning: could not represent character "9" (0x39) in font "nullfont"
+warning: slides.tex:290: 
+Missing character: There is no 4 ("34) in font nullfont!
+warning: could not represent character "4" (0x34) in font "nullfont"
+warning: slides.tex:290: Missing character: There is no 4 ("34) in font nullfont!
+warning: could not represent character "4" (0x34) in font "nullfont"
+warning: slides.tex:290: Missing character: There is no 4 ("34) in font nullfont!
+warning: could not represent character "4" (0x34) in font "nullfont"
+warning: slides.tex:290: Missing character: There is no 9 ("39) in font nullfont!
+warning: could not represent character "9" (0x39) in font "nullfont"
+warning: slides.tex:290: Missing character: There is no 5 ("35) in font nullfont!
+warning: could not represent character "5" (0x35) in font "nullfont"
+warning: slides.tex:290: Missing character: There is no 5 ("35) in font nullfont!
+warning: could not represent character "5" (0x35) in font "nullfont"
+warning: slides.tex:337: 
+Missing character: There is no 6 ("36) in font nullfont!
+warning: could not represent character "6" (0x36) in font "nullfont"
+warning: slides.tex:337: Missing character: There is no 0 ("30) in font nullfont!
+warning: could not represent character "0" (0x30) in font "nullfont"
+warning: slides.tex:337: Missing character: There is no 6 ("36) in font nullfont!
+warning: could not represent character "6" (0x36) in font "nullfont"
+warning: slides.tex:337: Missing character: There is no 5 ("35) in font nullfont!
+warning: could not represent character "5" (0x35) in font "nullfont"
+warning: slides.tex:337: Missing character: There is no 7 ("37) in font nullfont!
+warning: could not represent character "7" (0x37) in font "nullfont"
+warning: slides.tex:337: Missing character: There is no 0 ("30) in font nullfont!
+warning: could not represent character "0" (0x30) in font "nullfont"
+warning: slides.tex:386: 
+Missing character: There is no 7 ("37) in font nullfont!
+warning: could not represent character "7" (0x37) in font "nullfont"
+warning: slides.tex:386: Missing character: There is no 5 ("35) in font nullfont!
+warning: could not represent character "5" (0x35) in font "nullfont"
+warning: slides.tex:386: Missing character: There is no 8 ("38) in font nullfont!
+warning: could not represent character "8" (0x38) in font "nullfont"
+warning: slides.tex:386: Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:386: Missing character: There is no 8 ("38) in font nullfont!
+warning: could not represent character "8" (0x38) in font "nullfont"
+warning: slides.tex:386: Missing character: There is no 6 ("36) in font nullfont!
+warning: could not represent character "6" (0x36) in font "nullfont"
+warning: slides.tex:386: Missing character: There is no 9 ("39) in font nullfont!
+warning: could not represent character "9" (0x39) in font "nullfont"
+warning: slides.tex:386: Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:461: 
+Missing character: There is no 9 ("39) in font nullfont!
+warning: could not represent character "9" (0x39) in font "nullfont"
+warning: slides.tex:461: Missing character: There is no 6 ("36) in font nullfont!
+warning: could not represent character "6" (0x36) in font "nullfont"
+warning: slides.tex:461: Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:461: Missing character: There is no 0 ("30) in font nullfont!
+warning: could not represent character "0" (0x30) in font "nullfont"
+warning: slides.tex:461: Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:461: Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:461: Missing character: There is no 0 ("30) in font nullfont!
+warning: could not represent character "0" (0x30) in font "nullfont"
+warning: slides.tex:461: Missing character: There is no 6 ("36) in font nullfont!
+warning: could not represent character "6" (0x36) in font "nullfont"
+warning: slides.tex:521: 
+Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:521: Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:521: Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:521: Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:521: Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:521: Missing character: There is no 6 ("36) in font nullfont!
+warning: could not represent character "6" (0x36) in font "nullfont"
+warning: slides.tex:521: Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:521: Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:521: Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:521: Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:521: Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:521: Missing character: There is no 6 ("36) in font nullfont!
+warning: could not represent character "6" (0x36) in font "nullfont"
+warning: slides.tex:651: 
+Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:651: Missing character: There is no 3 ("33) in font nullfont!
+warning: could not represent character "3" (0x33) in font "nullfont"
+warning: slides.tex:651: Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:651: Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:651: Missing character: There is no 3 ("33) in font nullfont!
+warning: could not represent character "3" (0x33) in font "nullfont"
+warning: slides.tex:651: Missing character: There is no 6 ("36) in font nullfont!
+warning: could not represent character "6" (0x36) in font "nullfont"
+warning: slides.tex:651: Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:651: Missing character: There is no 4 ("34) in font nullfont!
+warning: could not represent character "4" (0x34) in font "nullfont"
+warning: slides.tex:651: Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:712: 
+Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:712: Missing character: There is no 4 ("34) in font nullfont!
+warning: could not represent character "4" (0x34) in font "nullfont"
+warning: slides.tex:712: Missing character: There is no 6 ("36) in font nullfont!
+warning: could not represent character "6" (0x36) in font "nullfont"
+warning: slides.tex:712: Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:712: Missing character: There is no 5 ("35) in font nullfont!
+warning: could not represent character "5" (0x35) in font "nullfont"
+warning: slides.tex:712: Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:779: 
+Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:779: Missing character: There is no 5 ("35) in font nullfont!
+warning: could not represent character "5" (0x35) in font "nullfont"
+warning: slides.tex:779: Missing character: There is no 6 ("36) in font nullfont!
+warning: could not represent character "6" (0x36) in font "nullfont"
+warning: slides.tex:779: Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:779: Missing character: There is no 6 ("36) in font nullfont!
+warning: could not represent character "6" (0x36) in font "nullfont"
+warning: slides.tex:779: Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:779: Missing character: There is no ��� (U+2713) in font [lmsans10-bold]:mapping=tex-text;!
+warning: could not represent character "✓" (0x2713) in font "[lmsans10-bold]:mapping=tex-text;"
+warning: slides.tex:818: 
+Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:818: Missing character: There is no 6 ("36) in font nullfont!
+warning: could not represent character "6" (0x36) in font "nullfont"
+warning: slides.tex:818: Missing character: There is no 6 ("36) in font nullfont!
+warning: could not represent character "6" (0x36) in font "nullfont"
+warning: slides.tex:818: Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:818: Missing character: There is no 7 ("37) in font nullfont!
+warning: could not represent character "7" (0x37) in font "nullfont"
+warning: slides.tex:818: Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:856: 
+Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:856: Missing character: There is no 7 ("37) in font nullfont!
+warning: could not represent character "7" (0x37) in font "nullfont"
+warning: slides.tex:856: Missing character: There is no 7 ("37) in font nullfont!
+warning: could not represent character "7" (0x37) in font "nullfont"
+warning: slides.tex:856: Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:856: Missing character: There is no 8 ("38) in font nullfont!
+warning: could not represent character "8" (0x38) in font "nullfont"
+warning: slides.tex:856: Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:1024: 
+Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:1024: Missing character: There is no 8 ("38) in font nullfont!
+warning: could not represent character "8" (0x38) in font "nullfont"
+warning: slides.tex:1024: Missing character: There is no 7 ("37) in font nullfont!
+warning: could not represent character "7" (0x37) in font "nullfont"
+warning: slides.tex:1024: Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:1024: Missing character: There is no 9 ("39) in font nullfont!
+warning: could not represent character "9" (0x39) in font "nullfont"
+warning: slides.tex:1024: Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:1065: 
+Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:1065: Missing character: There is no 9 ("39) in font nullfont!
+warning: could not represent character "9" (0x39) in font "nullfont"
+warning: slides.tex:1065: Missing character: There is no 7 ("37) in font nullfont!
+warning: could not represent character "7" (0x37) in font "nullfont"
+warning: slides.tex:1086: 
+Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:1086: Missing character: There is no 0 ("30) in font nullfont!
+warning: could not represent character "0" (0x30) in font "nullfont"
+warning: slides.tex:1086: Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:1112: 
+Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:1112: Missing character: There is no 0 ("30) in font nullfont!
+warning: could not represent character "0" (0x30) in font "nullfont"
+warning: slides.tex:1112: Missing character: There is no 7 ("37) in font nullfont!
+warning: could not represent character "7" (0x37) in font "nullfont"
+warning: slides.tex:1166: 
+Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:1166: Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:1166: Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:1166: Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:1166: Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:1166: Missing character: There is no 7 ("37) in font nullfont!
+warning: could not represent character "7" (0x37) in font "nullfont"
+warning: slides.tex:1213: 
+Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:1213: Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:1213: Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:1213: Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:1213: Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:1213: Missing character: There is no 7 ("37) in font nullfont!
+warning: could not represent character "7" (0x37) in font "nullfont"
+warning: slides.tex:1213: Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:1213: Missing character: There is no 3 ("33) in font nullfont!
+warning: could not represent character "3" (0x33) in font "nullfont"
+warning: slides.tex:1213: Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:1213: Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:1213: Missing character: There is no 3 ("33) in font nullfont!
+warning: could not represent character "3" (0x33) in font "nullfont"
+warning: slides.tex:1213: Missing character: There is no 8 ("38) in font nullfont!
+warning: could not represent character "8" (0x38) in font "nullfont"
+warning: slides.tex:1213: Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:1213: Missing character: There is no 4 ("34) in font nullfont!
+warning: could not represent character "4" (0x34) in font "nullfont"
+warning: slides.tex:1213: Missing character: There is no 3 ("33) in font nullfont!
+warning: could not represent character "3" (0x33) in font "nullfont"
+warning: slides.tex:1247: 
+Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:1247: Missing character: There is no 4 ("34) in font nullfont!
+warning: could not represent character "4" (0x34) in font "nullfont"
+warning: slides.tex:1247: Missing character: There is no 8 ("38) in font nullfont!
+warning: could not represent character "8" (0x38) in font "nullfont"
+warning: slides.tex:1247: Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:1247: Missing character: There is no 5 ("35) in font nullfont!
+warning: could not represent character "5" (0x35) in font "nullfont"
+warning: slides.tex:1247: Missing character: There is no 3 ("33) in font nullfont!
+warning: could not represent character "3" (0x33) in font "nullfont"
+warning: slides.tex:1247: Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:1247: Missing character: There is no 5 ("35) in font nullfont!
+warning: could not represent character "5" (0x35) in font "nullfont"
+warning: slides.tex:1247: Missing character: There is no 8 ("38) in font nullfont!
+warning: could not represent character "8" (0x38) in font "nullfont"
+warning: slides.tex:1247: Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:1247: Missing character: There is no 6 ("36) in font nullfont!
+warning: could not represent character "6" (0x36) in font "nullfont"
+warning: slides.tex:1247: Missing character: There is no 3 ("33) in font nullfont!
+warning: could not represent character "3" (0x33) in font "nullfont"
+warning: slides.tex:1285: 
+Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:1285: Missing character: There is no 6 ("36) in font nullfont!
+warning: could not represent character "6" (0x36) in font "nullfont"
+warning: slides.tex:1285: Missing character: There is no 8 ("38) in font nullfont!
+warning: could not represent character "8" (0x38) in font "nullfont"
+warning: slides.tex:1285: Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:1285: Missing character: There is no 7 ("37) in font nullfont!
+warning: could not represent character "7" (0x37) in font "nullfont"
+warning: slides.tex:1285: Missing character: There is no 3 ("33) in font nullfont!
+warning: could not represent character "3" (0x33) in font "nullfont"
+warning: slides.tex:1285: Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:1285: Missing character: There is no 7 ("37) in font nullfont!
+warning: could not represent character "7" (0x37) in font "nullfont"
+warning: slides.tex:1285: Missing character: There is no 8 ("38) in font nullfont!
+warning: could not represent character "8" (0x38) in font "nullfont"
+warning: slides.tex:1329: 
+Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:1329: Missing character: There is no 8 ("38) in font nullfont!
+warning: could not represent character "8" (0x38) in font "nullfont"
+warning: slides.tex:1329: Missing character: There is no 3 ("33) in font nullfont!
+warning: could not represent character "3" (0x33) in font "nullfont"
+warning: slides.tex:1329: Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:1329: Missing character: There is no 8 ("38) in font nullfont!
+warning: could not represent character "8" (0x38) in font "nullfont"
+warning: slides.tex:1329: Missing character: There is no 8 ("38) in font nullfont!
+warning: could not represent character "8" (0x38) in font "nullfont"
+warning: slides.tex:1329: Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:1329: Missing character: There is no 9 ("39) in font nullfont!
+warning: could not represent character "9" (0x39) in font "nullfont"
+warning: slides.tex:1329: Missing character: There is no 3 ("33) in font nullfont!
+warning: could not represent character "3" (0x33) in font "nullfont"
+warning: slides.tex:1329: Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:1329: Missing character: There is no 9 ("39) in font nullfont!
+warning: could not represent character "9" (0x39) in font "nullfont"
+warning: slides.tex:1329: Missing character: There is no 8 ("38) in font nullfont!
+warning: could not represent character "8" (0x38) in font "nullfont"
+warning: slides.tex:1397: 
+Missing character: There is no 3 ("33) in font nullfont!
+warning: could not represent character "3" (0x33) in font "nullfont"
+warning: slides.tex:1397: Missing character: There is no 0 ("30) in font nullfont!
+warning: could not represent character "0" (0x30) in font "nullfont"
+warning: slides.tex:1397: Missing character: There is no 3 ("33) in font nullfont!
+warning: could not represent character "3" (0x33) in font "nullfont"
+warning: slides.tex:1397: Missing character: There is no 3 ("33) in font nullfont!
+warning: could not represent character "3" (0x33) in font "nullfont"
+warning: slides.tex:1397: Missing character: There is no 0 ("30) in font nullfont!
+warning: could not represent character "0" (0x30) in font "nullfont"
+warning: slides.tex:1397: Missing character: There is no 8 ("38) in font nullfont!
+warning: could not represent character "8" (0x38) in font "nullfont"
+warning: slides.tex:1442: 
+Missing character: There is no 3 ("33) in font nullfont!
+warning: could not represent character "3" (0x33) in font "nullfont"
+warning: slides.tex:1442: Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:1442: Missing character: There is no 3 ("33) in font nullfont!
+warning: could not represent character "3" (0x33) in font "nullfont"
+warning: slides.tex:1442: Missing character: There is no 3 ("33) in font nullfont!
+warning: could not represent character "3" (0x33) in font "nullfont"
+warning: slides.tex:1442: Missing character: There is no 1 ("31) in font nullfont!
+warning: could not represent character "1" (0x31) in font "nullfont"
+warning: slides.tex:1442: Missing character: There is no 8 ("38) in font nullfont!
+warning: could not represent character "8" (0x38) in font "nullfont"
+warning: slides.tex:1442: Missing character: There is no 3 ("33) in font nullfont!
+warning: could not represent character "3" (0x33) in font "nullfont"
+warning: slides.tex:1442: Missing character: There is no 2 ("32) in font nullfont!
+warning: could not represent character "2" (0x32) in font "nullfont"
+warning: slides.tex:1442: Missing character: There is no 3 ("33) in font nullfont!
+warning: could not represent character "3" (0x33) in font "nullfont"
+note: Running xdvipdfmx ...
+note: downloading SHA256SUM
+note: downloading msam5.pfb
+note: Writing `slides.pdf` (11.71 MiB)
+note: Skipped writing 5 intermediate files (use --keep-intermediates to keep them)
+[compile] Done.
+-rw-r--r-- 1 eyavuz21 hpcusers 12M Feb 26  2026 slides.pdf

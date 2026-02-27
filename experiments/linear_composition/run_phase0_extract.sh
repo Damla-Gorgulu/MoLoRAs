@@ -9,9 +9,9 @@
 #SBATCH --gres=gpu:1
 #SBATCH --mem=128G
 #SBATCH --time=4:00:00
-#SBATCH --output=/scratch/dgorgulu21/mo-lora/MoLoRAs/experiments/linear_composition/logs/phase0_extract_%j.out
+#SBATCH --output=/scratch/eyavuz21/mo-lora/experiments/linear_composition/logs/phase0_extract_%j.out
 #SBATCH --mail-type=ALL
-#SBATCH --mail-user=dgorgulu21@ku.edu.tr
+#SBATCH --mail-user=eyavuz21@ku.edu.tr
 
 # ============================================================
 # Phase 0 — ΔW Extraction, Validation, and Matrix Build
@@ -30,7 +30,8 @@
 # ============================================================
 
 export PYTHONUNBUFFERED=1
-export EXPERIMENT_DIR=/scratch/dgorgulu21/mo-lora/MoLoRAs/experiments/linear_composition
+export EXPERIMENT_DIR=/scratch/eyavuz21/mo-lora/experiments/linear_composition
+export CODE_DIR=/home/eyavuz21/repos/MoLoRAs/experiments/linear_composition
 
 echo "========================================"
 echo "Linear Composition — Phase 0: ΔW Extraction"
@@ -59,7 +60,7 @@ echo "Conda env  : $CONDA_DEFAULT_ENV"
 echo "RAM        : $(free -h | head -2)"
 echo ""
 
-cd "$EXPERIMENT_DIR"
+cd "$CODE_DIR"
 
 # ============================================================
 # STEP 1 — Validate LoRA pool & extract ΔW norms

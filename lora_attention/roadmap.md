@@ -2005,8 +2005,168 @@ Each SVD is on a (d_out × d_in) matrix where d_out, d_in ≤ 1024. CPU LAPACK f
 |--------|-------------|--------|
 | 764077 | First fix (fp32 cast at SVD time only) | ❌ LinAlgError (linAlg raised) |
 | 764466 | Second fix (fp32 accumulation) | ❌ Silent hang (cuSOLVER hangs) |
-| 764485 | Third fix (CPU LAPACK for SVD) | ⏳ PENDING |
+| 764485 | Third fix (CPU LAPACK for SVD) | ✅ COMPLETED — training ran, first steps logged |
+
+Job 764485 completed successfully: Stage 2 v2.1 ran with CPU LAPACK SVD, no hangs or crashes.
+Training output: `/scratch/eyavuz21/lora_attention/stage2_v21/`, 24h time limit.
 
 ### Also completed this session
 
 - S2v2.0 inference sweep (job 764368): **80/80 images ✅** → `s2v2_inference_sweep_a2/`
+
+---
+
+## §31 — Stage 2 v2.1: Completion, Timeout, and Router Collapse Diagnosis (2026-02-25–27)
+
+### §31.1 — Stage 2 v2.1 Full Training Run
+
+After the CPU LAPACK fix (job 764485), Stage 2 v2.1 continued training. Two additional
+runs were submitted to cover the full 8,000 steps:
+
+| Job    | Status    | Steps reached | End time             | Note |
+|--------|-----------|---------------|----------------------|------|
+| 764485 | COMPLETED | ~500          | 2026-02-24T22:29     | CPU LAPACK fix confirmed working |
+| 765820 | CANCELLED | ~225 (step overlap) | 2026-02-25T21:36 | Manually cancelled — superseded by 765827 |
+| 765827 | TIMEOUT   | 3,775 / 8,000 | 2026-02-26T21:36     | Hit 24h wall limit; training was running |
+
+**Last checkpoint**: `latest.pt` at step 3775 (saved Feb 26 19:58).
+**Periodic checkpoints**: checkpoint-500 through checkpoint-3500 (every 500 steps).
+
+### §31.2 — Router Collapse: Discovered at Resumption
+
+When job 765827 timed out, the intention was to resume from `latest.pt`. Before resubmitting,
+the full `train_log.txt` was inspected.
+
+**Finding**: entropy has been `ent=-0.000000` since **step 50** — the very second log entry:
+
+```
+step=    25/8000  total=0.574339  ldm=0.582533  ent=-0.008194  λ=0.0997
+step=    50/8000  total=0.602205  ldm=0.602205  ent=-0.000000  λ=0.0994
+step=    75/8000  total=0.597248  ldm=0.597248  ent=-0.000000  λ=0.0992
+... (continues to step 3775 with ent=-0.000000 throughout)
+```
+
+The router **collapsed to a one-hot distribution at step 50 and never recovered**.
+
+### §31.3 — Root Cause: Zero Gradient at Collapse
+
+The entropy loss used in v2.1 was:
+```
+loss_entropy = -λ · H̄(A)    where H̄(A) = mean entropy of attention distribution
+```
+
+The gradient of entropy for a one-hot (collapsed) distribution is **mathematically zero**:
+
+$$\nabla_{A_i} H = -(\log A_i + 1) \quad \Rightarrow \quad \text{at } A_i = 1.0: \nabla = -(0 + 1) = -1$$
+
+Wait — the gradient is not actually zero at A_i=1. The issue is more subtle: in practice the
+attention saturates so quickly that the softmax logits diverge before gradients can counter it
+(a fundamental issue with maximising entropy of a softmax — the optimiser finds it easier to
+move logits to −∞ for N−1 experts than to equalise them). Combined with the initial Stage-1
+CE loss which trained the encoder to be *selective* (sharp routing), the Stage-2 entropy term
+was too weak (λ=0.0997 at step 25 already dropping to 0.0575 at step 3775) to reverse the
+deeply-encoded sharpness from Stage 1.
+
+The `ent=-0.000000` in logs is a **float32 precision issue**: `float(−λ·0) = −0.0` → logged
+as `-0.000000`. It means the computed `mean_entropy` term itself was producing exactly 0.0
+(fp32). This can happen when the `nan_to_num` sanitisation in `attention_entropy()` turns
+a near-zero log-probability into 0 before the sum, producing `0 × log(near-zero) = 0`.
+In either case: no useful gradient to reverse collapse.
+
+**Consequence**: The model trained for 3,775 steps as a **single-LoRA system**. The Stage 2
+run was entirely wasted compute.
+
+### §31.4 — Decision: Do Not Resume v2.1
+
+Resuming from `latest.pt` (step 3775) was attempted as job 768667, then immediately
+cancelled after the collapse was confirmed. Continuing with 4,225 more steps of collapsed
+routing would produce the same meaningless result.
+
+---
+
+## §32 — Stage 2 v2.2: Switch Load-Balancing Loss + Temperature Annealing (2026-02-27)
+
+### §32.1 — Design Changes
+
+Three problems were identified with the v2.1 Stage 2 loss:
+
+| Problem | v2.1 | v2.2 fix |
+|---------|------|----------|
+| **Entropy gradient = 0 at collapse** | Per-sample `-λH(A)` — gradient is practically 0 when attention is peaked because fp32 `0 × log(∼0) = 0` before the sum | Switch-Transformer load-balancing loss — gradient through `P_live` is never zero while routing is imbalanced |
+| **Snap-collapse in first 50 steps** | τ=1.0 fixed; Stage-1 CE pre-training left the encoder in a sharp state | Temperature annealing: τ=5.0 → 1.0 over 2,000 steps; high τ forces near-uniform softmax initially |
+| **λ too small at end** | λ linearly annealed 0.1 → 0.01; by end there's negligible pressure | λ_end raised to 0.05 — keeps meaningful load-balancing pressure throughout |
+
+### §32.2 — Switch Load-Balancing Loss
+
+Adapted from the Switch Transformer (Fedus et al., 2022):
+
+$$\mathcal{L}_{\text{lb}} = \lambda \cdot N \cdot \sum_{i=1}^{N_{\text{batch}}} \hat{f}_i \cdot P_i$$
+
+where:
+- $P_i$ = mean gate probability for expert $i$ across (tensor, rank) slots — **has gradient**
+- $\hat{f}_i$ = EMA of $P_i$ over recent steps (EMA decay β=0.99) — **no gradient** (detached)
+- $N$ = total expert pool size (109)
+
+**Key property**: $\hat{f}_i \cdot P_i$ is large when expert $i$ has been dominant (high $\hat{f}_i$)
+and still receives high probability (high $P_i$). The gradient $\partial \mathcal{L}_{\text{lb}}/\partial P_i = \lambda N \hat{f}_i$
+is non-zero as long as $\hat{f}_i > 0$ — even at full collapse (where $\hat{f}_{\text{top}} \approx 1$,
+providing maximum gradient to push $P_{\text{top}}$ down).
+
+**Implementation detail** (bug fixed in 768705 → 768718): `pool_indices` is a variable-size
+subset (5–20 experts) of the full 109. The EMA buffer `ema_expert_usage` is `(109,)` indexed
+by global expert ID. Each step: decay the full EMA, then `scatter_add_` the current batch's
+contribution using `pool_indices` as scatter indices. Use `ema_expert_usage[pool_indices]`
+as the EMA subset for the loss computation.
+
+### §32.3 — Temperature Annealing
+
+```
+τ(step) = τ_start + (τ_end − τ_start) · min(step / τ_warmup, 1.0)
+         = 5.0 → 1.0 over first 2,000 steps
+```
+
+At τ=5.0: logit differences of 0.1 produce attention spread of 0.1/5.0 = 0.02 — essentially
+uniform. This overrides the sharp encoder state inherited from Stage-1 CE training and gives
+the load-balancing loss time to establish gradient signal before the softmax is allowed to peak.
+
+### §32.4 — Logging Changes
+
+v2.2 logs replace `ent=` with three new fields:
+```
+lb=0.002341    ← load-balancing loss (should stay non-trivially positive)
+τ=4.750        ← current temperature
+top1=37(0.023) ← EMA top expert (ID 37, 2.3% average share)
+```
+
+Healthy training: `lb` stays ≥ 0.001, `top1` fraction stays below ~0.3, `top1` ID rotates.
+Router collapse: `lb` decays to ~0.000, one `top1` ID dominates with fraction → 1.0.
+
+### §32.5 — Job History
+
+| Job    | Status    | Note |
+|--------|-----------|------|
+| 768667 | CANCELLED | Attempted resume of v2.1 from step 3775; cancelled after collapse confirmed |
+| 768705 | FAILED    | v2.2 first attempt — EMA shape mismatch (pool_indices vs full 109) |
+| **768718** | **RUNNING** (ai12) | v2.2 corrected — scatter_add_ fix applied; τ annealing + lb loss |
+
+Output: `/scratch/eyavuz21/lora_attention/stage2_v22/`
+Script: `slurm/train_stage2_v22.sh`
+
+### §32.6 — Files Changed (v2.2 additions)
+
+| File | Change |
+|------|--------|
+| `train_stage2_v2.py` | Drop `--lambda_end` from 0.01 → 0.05; add `--tau_start`, `--tau_end`, `--tau_warmup_steps`, `--ema_beta`; add `get_temperature()` helper; replace per-sample entropy loss with EMA scatter_add_ load-balancing loss; update log line with `lb=`, `τ=`, `top1=` |
+| `slurm/train_stage2_v22.sh` | New script — all v2.2 hyperparams, outputs to `stage2_v22/` |
+
+### §32.7 — Next Steps
+
+1. **Monitor 768718** — first checkpoint at step 500. Key diagnostic:
+   - Does `lb=` stay non-trivially positive? (confirms gradient is flowing)
+   - Does `top1` fraction stay below 0.3? (confirms routing is not collapsing)
+   - Is `ldm=` decreasing? (confirms LDM signal is contributing)
+2. **After training** — run inference sweep with v2.2 weights at α=2.0:
+   - Copy `s1v21_inference_sweep.sh` → `s2v22_inference_sweep.sh`
+   - Change ckpt to `stage2_v22/latest.pt`
+3. **Compare S1v2.1 vs S2v2.2** — the key scientific question: does Stage-2 LDM training
+   (with correct gradient signal) improve style transfer quality over Stage-1 routing alone?

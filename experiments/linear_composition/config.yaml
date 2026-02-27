@@ -7,7 +7,7 @@ lora_pool_dir: /home/eyavuz21/repos/B-LoRA/blora_zoo/bloras
 style_images_dir: /home/eyavuz21/repos/B-LoRA/blora_zoo/style_images
 base_model_id: stabilityai/stable-diffusion-xl-base-1.0
 vae_model_id: madebyollin/sdxl-vae-fp16-fix
-experiment_dir: /scratch/dgorgulu21/mo-lora/MoLoRAs/experiments/linear_composition
+experiment_dir: /scratch/eyavuz21/mo-lora/experiments/linear_composition
 
 # -- LoRA conventions --
 lora_filename: pytorch_lora_weights.safetensors

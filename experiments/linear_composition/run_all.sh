@@ -13,7 +13,7 @@
 # Each phase only starts after the previous one completes successfully.
 # ============================================================
 
-EXPERIMENT_DIR=/scratch/dgorgulu21/mo-lora/MoLoRAs/experiments/linear_composition
+EXPERIMENT_DIR=/scratch/eyavuz21/mo-lora/experiments/linear_composition
 DRY_RUN=false
 
 if [ "$1" = "--dry" ]; then

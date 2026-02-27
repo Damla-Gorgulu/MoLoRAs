@@ -9,9 +9,9 @@
 #SBATCH --gres=gpu:1
 #SBATCH --mem=48G
 #SBATCH --time=2:00:00
-#SBATCH --output=/scratch/dgorgulu21/mo-lora/MoLoRAs/experiments/linear_composition/logs/phase0_sanity_%j.out
+#SBATCH --output=/scratch/eyavuz21/mo-lora/experiments/linear_composition/logs/phase0_sanity_%j.out
 #SBATCH --mail-type=ALL
-#SBATCH --mail-user=dgorgulu21@ku.edu.tr
+#SBATCH --mail-user=eyavuz21@ku.edu.tr
 
 # ============================================================
 # Phase 0 — Sanity Check: Image Generation
@@ -31,7 +31,8 @@
 # ============================================================
 
 export PYTHONUNBUFFERED=1
-export EXPERIMENT_DIR=/scratch/dgorgulu21/mo-lora/MoLoRAs/experiments/linear_composition
+export EXPERIMENT_DIR=/scratch/eyavuz21/mo-lora/experiments/linear_composition
+export CODE_DIR=/home/eyavuz21/repos/MoLoRAs/experiments/linear_composition
 
 echo "========================================"
 echo "Linear Composition — Phase 0: Sanity Check"
@@ -51,7 +52,7 @@ echo "GPU info   :"
 nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv,noheader 2>/dev/null
 echo ""
 
-cd "$EXPERIMENT_DIR"
+cd "$CODE_DIR"
 
 # ============================================================
 # Image Generation Sanity Check

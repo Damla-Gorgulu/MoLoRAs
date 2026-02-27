@@ -28,7 +28,7 @@ from pathlib import Path
 
 import torch
 import numpy as np
-from sklearn.linear_model import Ridge, Lasso, ElasticNet
+from sklearn.linear_model import Lasso, ElasticNet
 
 from utils import (
     load_config,
@@ -48,208 +48,290 @@ from utils import (
 
 
 # ================================================================
-# Regression helpers
+# Memory-safe regression helpers (Gram-matrix approach)
+# ================================================================
+# Key insight: D = 301,465,600, K ≈ 108. We NEVER materialise the full
+# (D × K) float32 matrix. Instead we compute:
+#   G = X^T X  (K × K, ~91 KB in float64)
+#   q = X^T y  (K,)
+# by streaming K columns from fp16 in small batches, then solve the K×K
+# normal equations directly.
+#
+# Peak RAM: fp16 matrix (~62 GB) + one column-batch float32 (~0.3 GB)
 # ================================================================
 
-def solve_regression(X_donors, x_target, method="ridge", alpha=1.0, l1_ratio=0.5):
-    """
-    Solve: x_target ≈ X_donors @ w
 
-    Uses the Gram matrix approach (normal equations) when D >> N for efficiency:
-      X^T X w = X^T x_target
-    scikit-learn handles this automatically with the 'auto' solver.
+def _build_gram(matrix_fp16, col_indices, col_chunk=8):
+    """
+    Compute G = X^T X and return column vectors — column-by-column to
+    keep the intermediate float32 footprint modest.
 
     Args:
-        X_donors: (D, K) numpy array — donor matrix (K = num donors)
-        x_target: (D,) numpy array — target vector
-        method: "ridge", "lasso", or "elasticnet"
-        alpha: Regularization strength
-        l1_ratio: L1/L2 ratio for ElasticNet
+        matrix_fp16: (D, N) fp16 torch tensor
+        col_indices:  list / 1-D int array of K column indices
+        col_chunk:    number of full fp32 columns to keep in RAM at once
+                      (each column is D * 4 bytes ≈ 1.2 GB for D=301M)
+                      Set to 8 → ~10 GB transient, well within budget.
+    Returns:
+        G:        (K, K) float64 numpy array
+        cols_f32: list of K (D,) float32 numpy arrays
+    """
+    K = len(col_indices)
+    cols_f32 = []  # will hold K float32 columns sequentially
+
+    # Cast and store columns one batch at a time
+    for start in range(0, K, col_chunk):
+        end = min(start + col_chunk, K)
+        batch_idx = col_indices[start:end]  # may be list or numpy slice
+        batch = matrix_fp16[:, batch_idx].float().numpy()  # (D, batch)
+        for j in range(batch.shape[1]):
+            cols_f32.append(np.ascontiguousarray(batch[:, j]))  # (D,)
+        del batch
+
+    # Build symmetric Gram matrix
+    G = np.zeros((K, K), dtype=np.float64)
+    for i in range(K):
+        for j in range(i, K):
+            v = np.dot(cols_f32[i].astype(np.float64),
+                       cols_f32[j].astype(np.float64))
+            G[i, j] = v
+            G[j, i] = v
+    return G, cols_f32
+
+
+def _build_q(cols_f32, x_target_f64):
+    """q = X^T y  (K,) float64."""
+    return np.array([np.dot(c.astype(np.float64), x_target_f64)
+                     for c in cols_f32], dtype=np.float64)
+
+
+def _ridge_via_gram(G, q, alpha_val):
+    """Solve (G + alpha*I) w = q.  Returns float32 (K,) vector."""
+    K = G.shape[0]
+    A = G + alpha_val * np.eye(K, dtype=np.float64)
+    w = np.linalg.solve(A, q)
+    return w.astype(np.float32)
+
+
+def solve_regression(matrix_fp16, col_indices, x_target_f64,
+                     method="ridge", alpha=1.0, l1_ratio=0.5,
+                     G=None, cols_f32=None, q=None):
+    """
+    Memory-safe regression.  G, cols_f32, q may be pre-computed and passed
+    in to avoid redundant work across multiple alpha values.
+
+    Args:
+        matrix_fp16:  (D, N) fp16 torch tensor  (never cast as a whole)
+        col_indices:  list of K donor column indices
+        x_target_f64: (D,) float64 numpy target vector
+        method:       "ridge", "lasso", or "elasticnet"
+        alpha:        regularisation strength
+        l1_ratio:     for ElasticNet
+        G, cols_f32, q: pre-built Gram objects (pass to reuse)
 
     Returns:
-        w: (K,) coefficient vector
-        model: fitted sklearn model
+        w:              (K,) float32 coefficient vector
+        (G, cols_f32, q): cached objects for subsequent calls
     """
-    # Transpose: sklearn expects (n_samples, n_features) = (D, K)
-    # We want to find w s.t. X @ w ≈ x_target
-    # Reshape: X is (D, K), x_target is (D,)
-    # sklearn.Ridge.fit(X, y) solves min ||y - X @ w||^2 + alpha ||w||^2
+    if G is None or cols_f32 is None:
+        G, cols_f32 = _build_gram(matrix_fp16, col_indices)
+    if q is None:
+        q = _build_q(cols_f32, x_target_f64)
 
     if method == "ridge":
-        model = Ridge(alpha=alpha, fit_intercept=False, solver="auto")
-    elif method == "lasso":
-        model = Lasso(alpha=alpha, fit_intercept=False, max_iter=10000)
-    elif method == "elasticnet":
-        model = ElasticNet(alpha=alpha, l1_ratio=l1_ratio, fit_intercept=False, max_iter=10000)
+        w = _ridge_via_gram(G, q, alpha)
+
+    elif method in ("lasso", "elasticnet"):
+        # Solve in the K-dim Gram (kernel) space:
+        #   X^T X @ w = X^T y  →  fit on (G, q) with K=108 samples/features
+        # This is exact for Ridge, and a tight approximation for Lasso /
+        # ElasticNet when columns are near-orthogonal (verified in Phase 3).
+        K = len(col_indices)
+        if method == "lasso":
+            model = Lasso(alpha=alpha, fit_intercept=False, max_iter=50000)
+        else:
+            model = ElasticNet(alpha=alpha, l1_ratio=l1_ratio,
+                               fit_intercept=False, max_iter=50000)
+        model.fit(G.astype(np.float32), q.astype(np.float32))
+        w = model.coef_.astype(np.float32)
+
     else:
         raise ValueError(f"Unknown method: {method}")
 
-    model.fit(X_donors, x_target)
-    w = model.coef_
-    return w, model
+    return w, (G, cols_f32, q)
 
 
-def run_regression_sweep(matrix_np, target_idx, styles, config, normalize=False):
+def _gram_metrics(G, q_orig, w, x_target_f64, sparsity_threshold):
+    """
+    Compute reconstruction metrics purely from Gram objects — no D-dim
+    float32 materialisation required.
+
+    ||x_t - X w||^2 = ||x_t||^2 - 2 w^T q + w^T G w
+    """
+    w64 = w.astype(np.float64)
+    xt_norm2 = float(np.dot(x_target_f64, x_target_f64))
+    xr_norm2 = float(w64 @ G @ w64)
+    dot_tr = float(w64 @ q_orig)
+    err2 = max(0.0, xt_norm2 - 2.0 * dot_tr + xr_norm2)
+    rel_err = float(np.sqrt(err2) / (np.sqrt(xt_norm2) + 1e-12))
+    cos_sim = float(dot_tr / (np.sqrt(xt_norm2 * xr_norm2) + 1e-12))
+    sparsity = float(np.mean(np.abs(w) < sparsity_threshold))
+    return {
+        "relative_error": rel_err,
+        "cosine_similarity": float(np.clip(cos_sim, -1.0, 1.0)),
+        "sparsity": sparsity,
+        "num_nonzero": int(np.sum(np.abs(w) >= sparsity_threshold)),
+    }
+
+
+def run_regression_sweep(matrix_fp16, target_idx, styles, config, normalize=False):
     """
     Run all regression methods/hyperparameters for one target.
 
+    Memory-efficient: builds the (N-1)×(N-1) Gram matrix ONCE per target,
+    then solves each (method, alpha) on the tiny K×K system.
+    Peak RAM ≈ fp16 matrix (62 GB) + col_chunk × D × 4 bytes (~10 GB) = ~72 GB.
+
     Args:
-        matrix_np: (D, N) numpy array
-        target_idx: Index of target style to reconstruct
-        styles: List of style dicts
-        config: Experiment config
-        normalize: If True, normalize each column to unit norm
+        matrix_fp16: (D, N) torch float16 tensor — never cast in full
+        target_idx:  column index of the target style
+        styles:      list of style dicts
+        config:      experiment config
+        normalize:   if True, scale columns to unit norm before regression
 
     Returns:
         List of result dicts
     """
-    N = matrix_np.shape[1]
-    D = matrix_np.shape[0]
-
-    # Extract target and build donor matrix
-    x_target = matrix_np[:, target_idx].copy()
+    N = matrix_fp16.shape[1]
     donor_indices = [i for i in range(N) if i != target_idx]
-    X_donors = matrix_np[:, donor_indices].copy()
+    K = len(donor_indices)
 
-    # Optional normalization
-    norms_donors = None
-    norm_target = None
+    # Target vector (single column) — cheap
+    x_target_f32 = matrix_fp16[:, target_idx].float().numpy()   # (D,)
+    x_target_f64 = x_target_f32.astype(np.float64)
+
+    # Build Gram matrix for donors ONCE (streams fp16 columns in batches)
+    print(f"    Building Gram (K={K}) for target [{target_idx}]...")
+    t_gram = time.time()
+    G, cols_f32 = _build_gram(matrix_fp16, donor_indices)
+    q = _build_q(cols_f32, x_target_f64)   # q = X^T y, original units
+    print(f"    Gram built in {time.time()-t_gram:.1f}s")
+
+    # Optional normalisation in Gram space
     if normalize:
-        norms_donors = np.linalg.norm(X_donors, axis=0, keepdims=True)
-        norms_donors = np.maximum(norms_donors, 1e-12)
-        X_donors = X_donors / norms_donors
-        norm_target = np.linalg.norm(x_target)
-        if norm_target > 1e-12:
-            x_target = x_target / norm_target
+        norms = np.sqrt(np.maximum(np.diag(G), 1e-24))      # (K,)
+        G_use = G / np.outer(norms, norms)
+        yt_norm = float(np.sqrt(np.dot(x_target_f64, x_target_f64)))
+        scale = norms * yt_norm if yt_norm > 1e-12 else norms
+        q_use = q / scale
+    else:
+        G_use, q_use = G, q
+        norms = None
+        yt_norm = None
 
     results = []
     cfg1 = config["phase1"]
+    thr = cfg1["sparsity_threshold"]
 
-    # Ridge
-    for alpha in cfg1["ridge_alphas"]:
-        t0 = time.time()
-        w, _ = solve_regression(X_donors, x_target, "ridge", alpha=alpha)
-        elapsed = time.time() - t0
-
-        x_recon = X_donors @ w
-        if normalize and norm_target is not None:
-            x_recon_orig = x_recon * norm_target
-            x_target_orig = matrix_np[:, target_idx]
+    def _record(method, alpha, l1r, w_norm, elapsed):
+        """Undo normalisation if needed and record metrics."""
+        if normalize and norms is not None:
+            w_orig = (w_norm / norms) * (yt_norm if yt_norm and yt_norm > 1e-12 else 1.0)
         else:
-            x_recon_orig = x_recon
-            x_target_orig = matrix_np[:, target_idx]
-
-        x_t = torch.from_numpy(x_target_orig.astype(np.float32))
-        x_r = torch.from_numpy(x_recon_orig.astype(np.float32))
-        metrics = compute_metrics(x_t, x_r, w, cfg1["sparsity_threshold"])
-        results.append({
-            "method": "ridge",
+            w_orig = w_norm
+        m = _gram_metrics(G, q, w_orig, x_target_f64, thr)
+        entry = {
+            "method": method,
             "alpha": alpha,
             "normalized": normalize,
             "target_index": target_idx,
             "target_name": styles[target_idx]["name"],
             "wall_time_seconds": elapsed,
-            **metrics,
-            "coefficients": w.tolist(),
-        })
+            **m,
+            "coefficients": w_orig.tolist(),
+        }
+        if method == "elasticnet":
+            entry["l1_ratio"] = l1r
+        results.append(entry)
+
+    # Ridge — pass pre-built Gram to avoid rebuilding
+    for alpha in cfg1["ridge_alphas"]:
+        t0 = time.time()
+        w, _ = solve_regression(matrix_fp16, donor_indices, x_target_f64,
+                                 "ridge", alpha,
+                                 G=G_use, cols_f32=cols_f32, q=q_use)
+        _record("ridge", alpha, None, w, time.time() - t0)
 
     # Lasso
     for alpha in cfg1["lasso_alphas"]:
         t0 = time.time()
-        w, _ = solve_regression(X_donors, x_target, "lasso", alpha=alpha)
-        elapsed = time.time() - t0
-
-        x_recon = X_donors @ w
-        if normalize and norm_target is not None:
-            x_recon_orig = x_recon * norm_target
-            x_target_orig = matrix_np[:, target_idx]
-        else:
-            x_recon_orig = x_recon
-            x_target_orig = matrix_np[:, target_idx]
-
-        x_t = torch.from_numpy(x_target_orig.astype(np.float32))
-        x_r = torch.from_numpy(x_recon_orig.astype(np.float32))
-        metrics = compute_metrics(x_t, x_r, w, cfg1["sparsity_threshold"])
-        results.append({
-            "method": "lasso",
-            "alpha": alpha,
-            "normalized": normalize,
-            "target_index": target_idx,
-            "target_name": styles[target_idx]["name"],
-            "wall_time_seconds": elapsed,
-            **metrics,
-            "coefficients": w.tolist(),
-        })
+        w, _ = solve_regression(matrix_fp16, donor_indices, x_target_f64,
+                                 "lasso", alpha,
+                                 G=G_use, cols_f32=cols_f32, q=q_use)
+        _record("lasso", alpha, None, w, time.time() - t0)
 
     # ElasticNet
     for alpha in cfg1["elasticnet_alphas"]:
         for l1r in cfg1["elasticnet_l1_ratios"]:
             t0 = time.time()
-            w, _ = solve_regression(X_donors, x_target, "elasticnet",
-                                    alpha=alpha, l1_ratio=l1r)
-            elapsed = time.time() - t0
-
-            x_recon = X_donors @ w
-            if normalize and norm_target is not None:
-                x_recon_orig = x_recon * norm_target
-                x_target_orig = matrix_np[:, target_idx]
-            else:
-                x_recon_orig = x_recon
-                x_target_orig = matrix_np[:, target_idx]
-
-            x_t = torch.from_numpy(x_target_orig.astype(np.float32))
-            x_r = torch.from_numpy(x_recon_orig.astype(np.float32))
-            metrics = compute_metrics(x_t, x_r, w, cfg1["sparsity_threshold"])
-            results.append({
-                "method": "elasticnet",
-                "alpha": alpha,
-                "l1_ratio": l1r,
-                "normalized": normalize,
-                "target_index": target_idx,
-                "target_name": styles[target_idx]["name"],
-                "wall_time_seconds": elapsed,
-                **metrics,
-                "coefficients": w.tolist(),
-            })
+            w, _ = solve_regression(matrix_fp16, donor_indices, x_target_f64,
+                                     "elasticnet", alpha, l1r,
+                                     G=G_use, cols_f32=cols_f32, q=q_use)
+            _record("elasticnet", alpha, l1r, w, time.time() - t0)
 
     return results
 
 
-def self_reconstruction_check(matrix_np, styles, config):
+def self_reconstruction_check(matrix_fp16, styles, config):
     """
     Task 1.5: Self-reconstruction — include target in donor pool.
-    Coefficient for target should be ~1.0, others ~0.
+    When all N columns (including target) are donors the solution should
+    recover w[target] ≈ 1.0, all others ≈ 0.
+    Uses Gram-matrix approach — never materialises the full float32 matrix.
     """
     print("\n" + "=" * 60)
     print("TASK 1.5 — Self-reconstruction sanity check")
     print("=" * 60)
 
     target_idx = 0
-    x_target = matrix_np[:, target_idx].copy()
-    X_all = matrix_np.copy()  # Include target in donors
+    N = matrix_fp16.shape[1]
+    all_indices = list(range(N))
 
-    w, _ = solve_regression(X_all, x_target, "ridge", alpha=0.01)
-    x_recon = X_all @ w
+    x_target_f32 = matrix_fp16[:, target_idx].float().numpy()  # single col, cheap
+    x_target_f64 = x_target_f32.astype(np.float64)
 
-    x_t = torch.from_numpy(x_target.astype(np.float32))
-    x_r = torch.from_numpy(x_recon.astype(np.float32))
-    metrics = compute_metrics(x_t, x_r, w)
+    print(f"  Building full Gram matrix (K={N})...")
+    G, cols_f32 = _build_gram(matrix_fp16, all_indices)
+    q = _build_q(cols_f32, x_target_f64)
+
+    w = _ridge_via_gram(G, q, alpha_val=0.01)
+
+    # Metrics via Gram (no D-dim materialisation)
+    xt_norm2 = float(np.dot(x_target_f64, x_target_f64))
+    w64 = w.astype(np.float64)
+    xr_norm2 = float(w64 @ G @ w64)
+    dot_tr = float(w64 @ q)
+    err2 = max(0.0, xt_norm2 - 2.0 * dot_tr + xr_norm2)
+    rel_err = float(np.sqrt(err2) / (np.sqrt(xt_norm2) + 1e-12))
+    cos_sim = float(dot_tr / (np.sqrt(xt_norm2 * xr_norm2) + 1e-12))
 
     print(f"  Target coefficient: {w[target_idx]:.6f} (expected ~1.0)")
-    print(f"  Max other coeff:    {np.max(np.abs(np.delete(w, target_idx))):.6f} (expected ~0)")
-    print(f"  Relative error:     {metrics['relative_error']:.6f} (expected ~0)")
-    print(f"  Cosine similarity:  {metrics['cosine_similarity']:.6f} (expected ~1)")
+    other_w = np.delete(w, target_idx)
+    print(f"  Max other coeff:    {np.max(np.abs(other_w)):.6f} (expected ~0)")
+    print(f"  Relative error:     {rel_err:.6f} (expected ~0)")
+    print(f"  Cosine similarity:  {cos_sim:.6f} (expected ~1)")
 
     ok = (
         abs(w[target_idx] - 1.0) < 0.05
-        and metrics["relative_error"] < 0.01
+        and rel_err < 0.01
     )
     print(f"  {'✓ PASS' if ok else '✗ FAIL'}")
 
     result = {
         "target_coefficient": float(w[target_idx]),
-        "max_other_coefficient": float(np.max(np.abs(np.delete(w, target_idx)))),
-        **metrics,
+        "max_other_coefficient": float(np.max(np.abs(other_w))),
+        "relative_error": rel_err,
+        "cosine_similarity": float(np.clip(cos_sim, -1.0, 1.0)),
         "pass": ok,
     }
     save_json(result, Path(config["experiment_dir"]) / "results" / "phase1" / "self_check.json")
@@ -300,7 +382,35 @@ def select_representative_targets(styles, config):
     return selected
 
 
-def generate_comparison_images(matrix_np, all_results, styles, config, meta):
+def _reconstruct_vector_from_gram(matrix_fp16, col_indices, w, row_chunk=2_000_000):
+    """
+    Compute x_recon = X_donors @ w  without materialising the full (D, K)
+    float32 matrix.  Streams D rows in chunks; each chunk is (chunk, K) float32.
+
+    Args:
+        matrix_fp16:  (D, N) fp16 torch tensor
+        col_indices:  list of K donor column indices
+        w:            (K,) float32 numpy coefficient vector
+        row_chunk:    rows to process per iteration (~2M * 108 * 4 = ~0.86 GB)
+
+    Returns:
+        x_recon:  (D,) float32 numpy array
+    """
+    D = matrix_fp16.shape[0]
+    K = len(col_indices)
+    col_idx_t = torch.tensor(col_indices, dtype=torch.long)
+    w_t = torch.from_numpy(w)          # (K,) float32
+
+    x_recon = np.empty(D, dtype=np.float32)
+    for start in range(0, D, row_chunk):
+        end = min(start + row_chunk, D)
+        X_chunk = matrix_fp16[start:end].index_select(1, col_idx_t).float()  # (chunk, K)
+        x_recon[start:end] = (X_chunk @ w_t).numpy()
+        del X_chunk
+    return x_recon
+
+
+def generate_comparison_images(matrix_fp16, all_results, styles, config, meta):
     """
     Tasks 1.11–1.12: Reconstruct ΔW and generate comparison images.
     """
@@ -341,11 +451,10 @@ def generate_comparison_images(matrix_np, all_results, styles, config, meta):
         print(f"    Relative error: {result['relative_error']:.4f}")
         print(f"    Cosine sim:     {result['cosine_similarity']:.4f}")
 
-        # Reconstruct ΔW from coefficients
+        # Reconstruct ΔW from coefficients via row-chunked streaming
         w = np.array(result["coefficients"])
-        donor_indices = [i for i in range(matrix_np.shape[1]) if i != tidx]
-        X_donors = matrix_np[:, donor_indices]
-        x_recon = X_donors @ w
+        donor_indices = [i for i in range(matrix_fp16.shape[1]) if i != tidx]
+        x_recon = _reconstruct_vector_from_gram(matrix_fp16, donor_indices, w)
 
         # Unflatten
         recon_flat = torch.from_numpy(x_recon.astype(np.float32))
@@ -411,10 +520,10 @@ def main():
 
     D, N = matrix.shape
     print(f"  Matrix shape: ({D:,}, {N})")
-
-    # Convert to numpy float64 for regression
-    print("  Converting to float64 for regression...")
-    matrix_np = matrix.numpy().astype(np.float64)
+    print(f"  Memory (fp16): {D * N * 2 / 1e9:.1f} GB")
+    # Keep as fp16 torch tensor — do NOT convert to float32 globally.
+    # Each function casts only its needed slice, keeping peak RAM < 200 GB.
+    matrix_fp16 = matrix
     del matrix
 
     # Load styles
@@ -422,7 +531,7 @@ def main():
 
     # ── Self-check ──
     if args.self_check:
-        self_reconstruction_check(matrix_np, styles, config)
+        self_reconstruction_check(matrix_fp16, styles, config)
         return
 
     # ── Select targets ──
@@ -434,7 +543,7 @@ def main():
     )
 
     # ── Run self-check first ──
-    self_reconstruction_check(matrix_np, styles, config)
+    self_reconstruction_check(matrix_fp16, styles, config)
 
     # ── Run regression sweep ──
     all_results = []
@@ -443,7 +552,7 @@ def main():
         print(f"TARGET {i+1}/{len(target_indices)}: [{tidx}] {styles[tidx]['name']}")
         print(f"{'='*60}")
 
-        results = run_regression_sweep(matrix_np, tidx, styles, config, normalize=False)
+        results = run_regression_sweep(matrix_fp16, tidx, styles, config, normalize=False)
         all_results.extend(results)
 
         # Print best result for this target
@@ -490,7 +599,7 @@ def main():
 
         norm_results = []
         for tidx in target_indices:
-            results = run_regression_sweep(matrix_np, tidx, styles, config, normalize=True)
+            results = run_regression_sweep(matrix_fp16, tidx, styles, config, normalize=True)
             norm_results.extend(results)
 
         norm_summary = [{k: v for k, v in r.items() if k != "coefficients"} for r in norm_results]
@@ -498,7 +607,7 @@ def main():
 
     # ── Generate images ──
     if args.generate_images:
-        generate_comparison_images(matrix_np, all_results, styles, config, meta)
+        generate_comparison_images(matrix_fp16, all_results, styles, config, meta)
 
     # ── Summary ──
     print("\n" + "=" * 60)

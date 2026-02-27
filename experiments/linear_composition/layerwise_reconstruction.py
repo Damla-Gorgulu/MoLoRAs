@@ -130,7 +130,7 @@ def extract_group_subvectors(matrix_fp16, key_order, shapes, group_keys):
         group_indices.extend(range(start, end))
 
     group_indices = np.array(group_indices)
-    sub_matrix = matrix_fp16[group_indices, :].numpy().astype(np.float64)
+    sub_matrix = matrix_fp16[group_indices, :].numpy().astype(np.float32)
     return sub_matrix, group_indices
 
 
@@ -214,11 +214,11 @@ def run_groupwise_regression(matrix_fp16, key_order, shapes, group_def, target_i
 
         # Combine all groups into full reconstruction
         D = matrix_fp16.shape[0]
-        full_recon = np.zeros(D, dtype=np.float64)
+        full_recon = np.zeros(D, dtype=np.float32)
         for idx_arr, val_arr in zip(reconstructed_indices, reconstructed_values):
             full_recon[idx_arr] = val_arr
 
-        full_target = matrix_fp16[:, tidx].numpy().astype(np.float64)
+        full_target = matrix_fp16[:, tidx].numpy().astype(np.float32)
         x_t_full = torch.from_numpy(full_target.astype(np.float32))
         x_r_full = torch.from_numpy(full_recon.astype(np.float32))
 
@@ -412,8 +412,8 @@ def main():
             scheme_def = grouping_config[best_scheme]["groups"]
             groups = assign_tensor_groups(key_order, scheme_def)
 
-            full_recon = np.zeros(D, dtype=np.float64)
-            matrix_np = matrix.numpy().astype(np.float64)
+            full_recon = np.zeros(D, dtype=np.float32)
+            # matrix already passed as fp16; extract_group_subvectors casts slices internally
             donor_cols = [i for i in range(N) if i != tidx]
 
             for g_name, g_keys in groups.items():

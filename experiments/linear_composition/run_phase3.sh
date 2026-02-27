@@ -7,11 +7,11 @@
 #SBATCH --qos=ai
 #SBATCH --account=ai
 #SBATCH --gres=gpu:1
-#SBATCH --mem=128G
+#SBATCH --mem=256G
 #SBATCH --time=8:00:00
-#SBATCH --output=/scratch/dgorgulu21/mo-lora/MoLoRAs/experiments/linear_composition/logs/phase3_%j.out
+#SBATCH --output=/scratch/eyavuz21/mo-lora/experiments/linear_composition/logs/phase3_%j.out
 #SBATCH --mail-type=ALL
-#SBATCH --mail-user=dgorgulu21@ku.edu.tr
+#SBATCH --mail-user=eyavuz21@ku.edu.tr
 
 # ============================================================
 # Phase 3 — Span Membership Interpretation
@@ -33,7 +33,8 @@
 # ============================================================
 
 export PYTHONUNBUFFERED=1
-export EXPERIMENT_DIR=/scratch/dgorgulu21/mo-lora/MoLoRAs/experiments/linear_composition
+export EXPERIMENT_DIR=/scratch/eyavuz21/mo-lora/experiments/linear_composition
+export CODE_DIR=/home/eyavuz21/repos/MoLoRAs/experiments/linear_composition
 
 echo "========================================"
 echo "Linear Composition — Phase 3: Span Membership"
@@ -51,7 +52,7 @@ echo "Python     : $(which python)"
 echo "RAM        : $(free -h | head -2)"
 echo ""
 
-cd "$EXPERIMENT_DIR"
+cd "$CODE_DIR"
 
 # Check prerequisites
 if [ ! -f "$EXPERIMENT_DIR/results/all_deltaw_matrix.pt" ]; then

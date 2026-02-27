@@ -125,9 +125,18 @@ def parse_args():
 
     # Entropy regularisation
     p.add_argument("--lambda_start", type=float, default=0.1,
-                   help="Starting entropy reg weight (high = encourage diversity).")
-    p.add_argument("--lambda_end", type=float, default=0.01,
-                   help="Final entropy reg weight (low = allow specialisation).")
+                   help="Starting load-balancing loss weight.")
+    p.add_argument("--lambda_end", type=float, default=0.05,
+                   help="Final load-balancing loss weight (kept higher to prevent re-collapse).")
+    # Temperature annealing: start hot (near-uniform softmax) → cool to 1.0
+    p.add_argument("--tau_start", type=float, default=5.0,
+                   help="Initial softmax temperature (high → near-uniform routing).")
+    p.add_argument("--tau_end", type=float, default=1.0,
+                   help="Final softmax temperature.")
+    p.add_argument("--tau_warmup_steps", type=int, default=2000,
+                   help="Steps over which to anneal temperature from tau_start → tau_end.")
+    p.add_argument("--ema_beta", type=float, default=0.99,
+                   help="EMA decay for expert usage tracking in load-balancing loss.")
 
     # Logging / saving
     p.add_argument("--log_every", type=int, default=25)
@@ -148,9 +157,22 @@ def get_lr(step: int, warmup_steps: int, base_lr: float) -> float:
 def get_lambda_entropy(
     step: int, max_steps: int, lam_start: float, lam_end: float
 ) -> float:
-    """Linear annealing of entropy regularisation weight."""
+    """Linear annealing of load-balancing loss weight."""
     progress = min(step / max(1, max_steps), 1.0)
     return lam_start + (lam_end - lam_start) * progress
+
+
+def get_temperature(step: int, tau_start: float, tau_end: float,
+                    tau_warmup_steps: int) -> float:
+    """
+    Anneal softmax temperature from tau_start → tau_end over tau_warmup_steps.
+    High temperature (τ >> 1) forces near-uniform routing, preventing
+    snap-collapse in early training.  After warmup, τ = tau_end (typically 1.0).
+    """
+    if tau_warmup_steps <= 0 or tau_start == tau_end:
+        return tau_end
+    progress = min(step / tau_warmup_steps, 1.0)
+    return tau_start + (tau_end - tau_start) * progress
 
 
 def load_sdxl_pipeline(args, device):
@@ -337,6 +359,16 @@ def train(args):
     running_loss_ldm = 0.0
     running_loss_ent = 0.0
     running_loss_total = 0.0
+
+    # EMA of mean router probability per expert  (N,).
+    # Used by the Switch-style load-balancing loss:
+    #   L_lb = λ · N · Σ_i  f_ema_i · P_i
+    # where f_ema_i is the EMA fraction (no gradient) and P_i = A.mean()
+    # has gradient.  This is ALWAYS non-zero when routing is imbalanced,
+    # including when fully collapsed — unlike entropy which has zero gradient
+    # at a one-hot distribution.
+    N_experts = model.pool.num_experts   # number of LoRA experts
+    ema_expert_usage = torch.full((N_experts,), 1.0 / N_experts, device=device)
     data_iter = iter(loader)
 
     while step < args.max_steps:
@@ -365,13 +397,31 @@ def train(args):
         # ── CLIP encode (expects PIL) ──────────────────────
         q = model.encode_image(image, device)  # (1, clip_dim)
 
-        # ── MoELoRAv2 forward (per-tensor, τ=1.0, product-space synth) ─────
-        A, synth_lora = model.forward(q, pool_indices, temperature=1.0, product_space=True)
+# ── Temperature-annealed forward ──────────────────
+        tau = get_temperature(step, args.tau_start, args.tau_end,
+                              args.tau_warmup_steps)
+        A, synth_lora = model.forward(q, pool_indices, temperature=tau,
+                                      product_space=True)
         # A: (N, T, r) with grad_fn
 
-        # ── Entropy regularisation ─────────────────────────
-        mean_entropy = model.attention_entropy(A)  # scalar, has grad_fn
-        loss_entropy = -lam * mean_entropy  # negative: MAXIMISE entropy
+        # ── Switch-style load-balancing loss ──────────────
+        # pool_indices is the subset of experts in this batch (variable N_batch).
+        # ema_expert_usage is (N_experts=109,) — full-pool EMA indexed by expert id.
+        pool_idx_t = torch.tensor(pool_indices, dtype=torch.long, device=device)
+        N_batch = len(pool_indices)
+
+        with torch.no_grad():
+            P_detached = A.detach().float().mean(dim=(1, 2))  # (N_batch,)
+            # Scatter into full EMA buffer: decay all, then add this batch's slice
+            ema_expert_usage.mul_(args.ema_beta)
+            ema_expert_usage.scatter_add_(
+                0, pool_idx_t, P_detached * (1.0 - args.ema_beta)
+            )
+        # Gradient-carrying term for this batch's experts only
+        P_live = A.float().mean(dim=(1, 2))                   # (N_batch,), has grad
+        ema_subset = ema_expert_usage[pool_idx_t].detach()    # (N_batch,)
+        # L_lb = λ · N_full · Σ_i f_ema_i · P_i  (larger when one expert dominates)
+        loss_entropy = lam * N_experts * (ema_subset * P_live).sum()
 
         # ── VAE encode → latents ──────────────────────────
         image_tensor = _IMG_TRANSFORM(image).unsqueeze(0)
@@ -442,8 +492,10 @@ def train(args):
                 f"step={step:6d}/{args.max_steps}  "
                 f"total={avg_total:.6f}  "
                 f"ldm={avg_ldm:.6f}  "
-                f"ent={avg_ent:.6f}  "
+                f"lb={avg_ent:.6f}  "
                 f"λ={lam:.4f}  "
+                f"τ={get_temperature(step, args.tau_start, args.tau_end, args.tau_warmup_steps):.3f}  "
+                f"top1={int(ema_expert_usage.argmax())}({ema_expert_usage.max():.3f})  "
                 f"lr={lr:.2e}"
             )
 
