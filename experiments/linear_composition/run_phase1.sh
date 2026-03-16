@@ -8,27 +8,26 @@
 #SBATCH --account=ai
 #SBATCH --gres=gpu:1
 #SBATCH --mem=256G
-#SBATCH --time=6:00:00
+#SBATCH --time=12:00:00
 #SBATCH --output=/scratch/eyavuz21/mo-lora/experiments/linear_composition/logs/phase1_%j.out
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=eyavuz21@ku.edu.tr
 
 # ============================================================
-# Phase 1 — Global Linear Reconstruction
+# Phase 1 — Global Linear Reconstruction (single pass)
 # ============================================================
-# Tasks: 1.1–1.13 from TODO.md
+# The script now:
+#   - Builds or loads cached full Gram matrix (109×109)
+#   - Skips self-check if already passed
+#   - Extracts LOO sub-Grams instantly per target (no re-reading 62 GB)
+#   - Runs Ridge / Lasso / ElasticNet + normalization ablation
+#   - Generates comparison images
 #
-# This script:
-#   1. Self-reconstruction sanity check
-#   2. Ridge / Lasso / ElasticNet sweep on 10 representative targets
-#   3. Normalization ablation
-#   4. Generates comparison images (best/median/worst)
-#
-# Requires: ~64 GB RAM for matrix, GPU for image generation
-# Expected runtime: ~2–4 hours
+# Estimated runtime:
+#   ~3.5 h (first run — Gram build) + ~30 min (regression + images)
+#   ~30 min (subsequent runs — Gram cached)
 #
 # PREREQUISITE: run_phase0_extract.sh must have completed
-#               (needs all_deltaw_matrix.pt)
 # ============================================================
 
 export PYTHONUNBUFFERED=1
@@ -62,48 +61,18 @@ if [ ! -f "$EXPERIMENT_DIR/results/all_deltaw_matrix.pt" ]; then
 fi
 
 # ============================================================
-# STEP 1 — Self-reconstruction check
+# Run Phase 1 — single pass (Gram cached, self-check cached)
 # ============================================================
 echo "========================================"
-echo "STEP 1: Self-reconstruction sanity check"
+echo "Running Phase 1: regression + normalization + images"
 echo "========================================"
-python global_reconstruction.py --self-check
-STEP1_EXIT=$?
-if [ $STEP1_EXIT -ne 0 ]; then
-    echo "ERROR: Self-check failed with exit code $STEP1_EXIT"
-    exit $STEP1_EXIT
+python global_reconstruction.py --normalize --generate-images
+EXIT_CODE=$?
+if [ $EXIT_CODE -ne 0 ]; then
+    echo "ERROR: Phase 1 failed with exit code $EXIT_CODE"
+    exit $EXIT_CODE
 fi
-echo "Step 1 complete at $(date)"
-echo ""
-
-# ============================================================
-# STEP 2 — Full regression sweep + normalization ablation
-# ============================================================
-echo "========================================"
-echo "STEP 2: Regression sweep + normalization ablation"
-echo "========================================"
-python global_reconstruction.py --normalize
-STEP2_EXIT=$?
-if [ $STEP2_EXIT -ne 0 ]; then
-    echo "ERROR: Regression sweep failed with exit code $STEP2_EXIT"
-    exit $STEP2_EXIT
-fi
-echo "Step 2 complete at $(date)"
-echo ""
-
-# ============================================================
-# STEP 3 — Generate comparison images
-# ============================================================
-echo "========================================"
-echo "STEP 3: Comparison images (best/median/worst)"
-echo "========================================"
-python global_reconstruction.py --generate-images
-STEP3_EXIT=$?
-if [ $STEP3_EXIT -ne 0 ]; then
-    echo "WARNING: Image generation failed with exit code $STEP3_EXIT"
-    echo "Regression results are still valid."
-fi
-echo "Step 3 complete at $(date)"
+echo "Phase 1 complete at $(date)"
 echo ""
 
 # ============================================================

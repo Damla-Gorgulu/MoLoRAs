@@ -1,27 +1,25 @@
 #!/bin/bash
 #
-# Stage-1 v2.1: Inference Sweep
+# Stage-1 v2.0: Product-Space Synthesis Sweep  (CORRECTED)
 #
-# Tests the v2.1 encoder (CE routing, product-space synthesis) directly at
-# Stage 1 — no Stage 2 LDM fine-tuning. This lets us evaluate routing quality
-# before committing to the expensive Stage 2 run.
+# Fixes the O(N²) cross-term cancellation bug in parameter-averaging synthesis.
+# Uses --product_synth: ΔW = Σ A_i*(W_up_i @ W_down_i), decomposed via SVD.
 #
-# Sweep structure (same as s1v2_ps_sweep.sh):
-#   SWEEP 1: product-space synth + style prompt  (4×2×3×2 = 48 runs)
-#   SWEEP 2: product-space synth + neutral prompt (4×2×2 = 16 runs)
-#   SWEEP 3: reference B-LoRA baselines           (4×2 = 8 runs)
-#   SWEEP 4: vanilla SDXL baseline               (4×2 = 8 runs)
-#   Total: ~80 runs × ~50s ≈ ~1.1h on V100
+# Key questions:
+#   Q1. Does product-space synth produce visible style change?  (SWEEP 1)
+#   Q2. Does routing sharpness (τ, top_k) affect visual quality? (SWEEP 1)
+#   Q3. What does the correct "average style" look like?        (SWEEP 2 neutral)
+#   Q4. How does oracle (top-k=1) compare to soft routing?      (SWEEP 1)
+#   Ref: what does a real B-LoRA inject look like?              (SWEEP 3)
+#
+# ~80 runs × ~50s each ≈ ~1h on V100.
 #
 # Usage:
 #   cd /home/eyavuz21/repos/MoLoRAs
-#   sbatch lora_attention/slurm/s1v21_inference_sweep.sh
-#
-# Override checkpoint:
-#   CKPT=/scratch/eyavuz21/lora_attention/stage1_v21/checkpoint-13000 sbatch ...
+#   sbatch lora_attention/slurm/s2v2_ps_sweep.sh
 #
 
-#SBATCH --job-name=S1v21-inf
+#SBATCH --job-name=S2v22-PS
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=4
@@ -57,24 +55,18 @@ WIKIART="/home/eyavuz21/datasets/wikiart"
 ZOO_DIR="/home/eyavuz21/repos/B-LoRA/blora_zoo/bloras"
 STYLE_IMG_DIR="/home/eyavuz21/repos/B-LoRA/blora_zoo/style_images"
 CACHE_DIR="/scratch/eyavuz21/lora_attention"
-CKPT="${CKPT:-/scratch/eyavuz21/lora_attention/stage1_v21/latest.pt}"
-OUT_ROOT="/scratch/eyavuz21/lora_attention/s1v21_inference_sweep_a2"
+CKPT="/scratch/eyavuz21/lora_attention/stage2_v22/latest.pt"
+OUT_ROOT="/scratch/eyavuz21/lora_attention/s2v22_ps_sweep"
 
 export PYTHONPATH="$REPO_ROOT:${REPO_ROOT}/../B-LoRA-fresh/B-LoRA:${PYTHONPATH:-}"
 
 mkdir -p "$OUT_ROOT"
-
-echo "CKPT:     $CKPT"
-echo "OUT_ROOT: $OUT_ROOT"
 
 # ── Fixed settings ───────────────────────────────────────────
 SEED=42
 NUM_IMAGES=1
 STEPS=30
 GUIDANCE=7.5
-# α=2.0: sweet spot found via alpha_diag (job 764053).
-# synth_norm≈16 vs real B-LoRA norm≈50; α<1.5 → invisible, α>3 → distorted.
-ALPHA=2.0
 
 RUN_COUNT=0
 FAIL_COUNT=0
@@ -100,25 +92,25 @@ run() {
     echo "── Run $RUN_COUNT: $tag ──"
 
     local extra_args=()
-    [[ "$topk"      != "none"  ]] && extra_args+=(--top_k "$topk")
-    [[ "$ref_blora" != "none"  ]] && extra_args+=(--reference_blora "$ref_blora")
-    [[ "$gt"        != "none"  ]] && extra_args+=(--gt_expert "$gt")
-    [[ "$use_ps"    == "true"  ]] && extra_args+=(--product_synth)
+    [[ "$topk"    != "none"  ]] && extra_args+=(--top_k "$topk")
+    [[ "$ref_blora" != "none" ]] && extra_args+=(--reference_blora "$ref_blora")
+    [[ "$gt"      != "none"  ]] && extra_args+=(--gt_expert "$gt")
+    [[ "$use_ps"  == "true"  ]] && extra_args+=(--product_synth)
 
     "$PYTHON" "$SCRIPT" \
-        --checkpoint          "$CKPT" \
-        --style_image         "$style_img" \
-        --prompt              "$prompt" \
-        --output_dir          "$out_dir" \
-        --zoo_dir             "$ZOO_DIR" \
-        --cache_dir           "$CACHE_DIR" \
-        --temperature         "$temp" \
-        --style_alpha         "$alpha" \
-        --num_images          "$NUM_IMAGES" \
+        --checkpoint   "$CKPT" \
+        --style_image  "$style_img" \
+        --prompt       "$prompt" \
+        --output_dir   "$out_dir" \
+        --zoo_dir      "$ZOO_DIR" \
+        --cache_dir    "$CACHE_DIR" \
+        --temperature  "$temp" \
+        --style_alpha  "$alpha" \
+        --num_images   "$NUM_IMAGES" \
         --num_inference_steps "$STEPS" \
-        --guidance_scale      "$GUIDANCE" \
-        --seed                "$SEED" \
-        --query_label         "$tag" \
+        --guidance_scale "$GUIDANCE" \
+        --seed         "$SEED" \
+        --query_label  "$tag" \
         "${extra_args[@]}" \
     || { echo "  !! FAILED: $tag"; FAIL_COUNT=$((FAIL_COUNT + 1)); }
 }
@@ -163,8 +155,8 @@ REF_BLORAS[expressionism]="$ZOO_DIR/style_0010_Expressionism/pytorch_lora_weight
 
 # ════════════════════════════════════════════════════════════════
 # SWEEP 1: Product-space synth + style prompt
-# τ=[0.005, 0.05, 0.5] × top_k=[none,1] — routing sharpness sweep.
-# top_k=1 forces oracle single-expert routing (best case baseline).
+# τ=[0.005, 0.05, 0.5] × top_k=[none,1] to test routing sharpness.
+# top_k=1 forces oracle single-expert routing; verifies injection works.
 # 4 styles × 2 sources × 3 temps × 2 topk = 48 runs
 # ════════════════════════════════════════════════════════════════
 echo ""
@@ -172,6 +164,7 @@ echo "════════════ SWEEP 1: Product-space synth + style 
 
 TEMPS=(0.005 0.05 0.5)
 TOPKS=(none 1)
+ALPHAS=(1.5 2.0 2.5)
 
 for style in "${STYLE_LIST[@]}"; do
     eval prompt="\${STYLE_PROMPTS[$style]}"
@@ -186,8 +179,10 @@ for style in "${STYLE_LIST[@]}"; do
 
         for temp in "${TEMPS[@]}"; do
             for topk in "${TOPKS[@]}"; do
-                tag="${style}/${src}/ps_t${temp}_k${topk}"
-                run "$tag" "$img" "$prompt" "$temp" "$topk" "$ALPHA" "none" "$gt" "true"
+                for alpha in "${ALPHAS[@]}"; do
+                    tag="${style}/${src}/ps_t${temp}_k${topk}_a${alpha}"
+                    run "$tag" "$img" "$prompt" "$temp" "$topk" "$alpha" "none" "$gt" "true"
+                done
             done
         done
     done
@@ -195,11 +190,13 @@ done
 
 # ════════════════════════════════════════════════════════════════
 # SWEEP 2: Product-space synth + NEUTRAL prompt
-# Removes text-style cue so synth LoRA carries the style signal alone.
+# Removes text-style cue so synth LoRA style is the only style signal.
 # 4 styles × 2 sources × 2 temps = 16 runs
 # ════════════════════════════════════════════════════════════════
 echo ""
-echo "════════════ SWEEP 2: Product-space synth + neutral prompt ════════════"
+echo "════════════ SWEEP 2: Product-space synth + NEUTRAL prompt ════════════"
+
+ALPHAS=(1.5 2.0 2.5)
 
 for style in "${STYLE_LIST[@]}"; do
     eval neutral="\${NEUTRAL_PROMPTS[$style]}"
@@ -213,8 +210,10 @@ for style in "${STYLE_LIST[@]}"; do
         fi
 
         for temp in "0.005" "0.5"; do
-            tag="${style}/${src}/ps_neutral_t${temp}"
-            run "$tag" "$img" "$neutral" "$temp" "none" "$ALPHA" "none" "$gt" "true"
+            for alpha in "${ALPHAS[@]}"; do
+                tag="${style}/${src}/ps_neutral_t${temp}_a${alpha}"
+                run "$tag" "$img" "$neutral" "$temp" "none" "$alpha" "none" "$gt" "true"
+            done
         done
     done
 done
@@ -262,7 +261,7 @@ done
 
 echo ""
 echo "========================================"
-echo "S1v21 inference sweep complete."
+echo "S2v2-PS sweep complete."
 echo "Total runs: $RUN_COUNT"
 echo "Failures:   $FAIL_COUNT"
 echo "Output:     $OUT_ROOT"

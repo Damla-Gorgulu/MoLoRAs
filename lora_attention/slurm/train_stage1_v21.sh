@@ -45,7 +45,8 @@ module load cudnn/8.2.1
 module load conda3/latest
 
 # ── Conda environment ───────────────────────────────────────
-PYTHON="/home/eyavuz21/.conda/envs/B-LoRA_2/bin/python"
+source activate B-LoRA_2 || conda activate B-LoRA_2
+PYTHON="python"
 export PYTHONUNBUFFERED=1
 
 # ── Paths ───────────────────────────────────────────────────
@@ -109,6 +110,7 @@ fi
     --save_every           "$SAVE_EVERY" \
     --log_every            "$LOG_EVERY" \
     --num_workers          "$NUM_WORKERS" \
+    --no_normalize_keys    \
     ${RESUME:+--resume_from "$RESUME"}
 
 echo "========================================"

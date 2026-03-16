@@ -22,6 +22,7 @@ Usage:
 """
 
 import argparse
+import gc
 import json
 import sys
 import time
@@ -206,9 +207,13 @@ def run_groupwise_regression(matrix_fp16, key_order, shapes, group_def, target_i
                 "wall_time_seconds": elapsed,
             }
 
-            # Store for full reconstruction
+            # Store for full reconstruction (keep only small-ish recon vector)
             reconstructed_indices.append(group_idx)
             reconstructed_values.append(x_recon_g)
+
+            # Free the large float32 arrays before next group iteration
+            del sub_matrix, X_donors_g, x_target_g
+            gc.collect()
 
             print(f"    {g_name}: error={err:.4f}, cos={cos:.4f}")
 
@@ -427,6 +432,8 @@ def main():
                 model = Ridge(alpha=alpha, fit_intercept=False, solver="auto")
                 model.fit(X_donors_g, x_target_g)
                 full_recon[group_idx] = X_donors_g @ model.coef_
+                del sub_matrix, X_donors_g, x_target_g
+                gc.collect()
 
             # Unflatten
             recon_flat = torch.from_numpy(full_recon.astype(np.float32))

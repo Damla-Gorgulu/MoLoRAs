@@ -46,7 +46,8 @@ module load cudnn/8.2.1
 module load conda3/latest
 
 # ── Conda environment ───────────────────────────────────────
-PYTHON="/home/eyavuz21/.conda/envs/B-LoRA_2/bin/python"
+source activate B-LoRA_2 || conda activate B-LoRA_2
+PYTHON="python"
 export PYTHONUNBUFFERED=1
 
 # ── Paths ───────────────────────────────────────────────────
@@ -81,6 +82,12 @@ MAX_IMAGES="${MAX_IMAGES:-500}"
 SAVE_EVERY="${SAVE_EVERY:-500}"
 LOG_EVERY="${LOG_EVERY:-25}"
 RESUME="${RESUME:-}"
+
+# Auto-resume from latest.pt if it exists and RESUME not explicitly set
+if [[ -z "$RESUME" && -f "$OUTPUT_DIR/latest.pt" ]]; then
+    RESUME="$OUTPUT_DIR/latest.pt"
+    echo "Auto-resuming from: $RESUME"
+fi
 
 echo "----------------------------------------"
 echo "stage:        Stage 2 v2.2 (load-balance fix)"
@@ -129,6 +136,7 @@ fi
     --save_every         "$SAVE_EVERY" \
     --log_every          "$LOG_EVERY" \
     --mixed_precision    fp16 \
+    --no_normalize_keys  \
     ${RESUME:+--resume_from "$RESUME"}
 
 echo "========================================"

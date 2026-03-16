@@ -1,0 +1,1 @@
+import torch; ckpt=torch.load("/scratch/eyavuz21/lora_attention/stage1_v21/latest.pt", map_location="cpu"); print("proj_1280.weight" in ckpt["encoder_state_dict"]); print("head_1280.0.weight" in ckpt["encoder_state_dict"])

@@ -7,7 +7,7 @@
 #SBATCH --qos=ai
 #SBATCH --account=ai
 #SBATCH --gres=gpu:1
-#SBATCH --mem=256G
+#SBATCH --mem=150G
 #SBATCH --time=6:00:00
 #SBATCH --output=/scratch/eyavuz21/mo-lora/experiments/linear_composition/logs/phase2_%j.out
 #SBATCH --mail-type=ALL

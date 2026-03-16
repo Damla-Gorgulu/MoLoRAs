@@ -252,9 +252,14 @@ def save_checkpoint(output_dir, step, model, optimizer, loss):
 # ──────────────────────────────────────────────────────────────
 # Training loop
 # ──────────────────────────────────────────────────────────────
+from accelerate import Accelerator
+
 def train(args):
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    assert device.type == "cuda", "Stage 2 requires a GPU."
+    accelerator = Accelerator(
+        gradient_accumulation_steps=1,
+        mixed_precision=args.mixed_precision,
+    )
+    device = accelerator.device
     print(f"[Stage2-v2] Device: {device}")
 
     weight_dtype = {
@@ -359,6 +364,7 @@ def train(args):
     running_loss_ldm = 0.0
     running_loss_ent = 0.0
     running_loss_total = 0.0
+    running_skipped = 0  # steps where Inf/NaN gradients forced skip
 
     # EMA of mean router probability per expert  (N,).
     # Used by the Switch-style load-balancing loss:
@@ -410,15 +416,20 @@ def train(args):
         pool_idx_t = torch.tensor(pool_indices, dtype=torch.long, device=device)
         N_batch = len(pool_indices)
 
+        # Sanitize A: fp16 softmax can produce NaN/Inf on edge cases.
+        # (The synthesis path already does nan_to_num in _synthesise_product_space,
+        #  but LB-loss uses raw A — must sanitize here too.)
+        A_safe = torch.nan_to_num(A.float(), nan=0.0, posinf=1.0, neginf=0.0)
+
         with torch.no_grad():
-            P_detached = A.detach().float().mean(dim=(1, 2))  # (N_batch,)
+            P_detached = A_safe.detach().mean(dim=(1, 2))  # (N_batch,)
             # Scatter into full EMA buffer: decay all, then add this batch's slice
             ema_expert_usage.mul_(args.ema_beta)
             ema_expert_usage.scatter_add_(
                 0, pool_idx_t, P_detached * (1.0 - args.ema_beta)
             )
         # Gradient-carrying term for this batch's experts only
-        P_live = A.float().mean(dim=(1, 2))                   # (N_batch,), has grad
+        P_live = A_safe.mean(dim=(1, 2))                      # (N_batch,), has grad
         ema_subset = ema_expert_usage[pool_idx_t].detach()    # (N_batch,)
         # L_lb = λ · N_full · Σ_i f_ema_i · P_i  (larger when one expert dominates)
         loss_entropy = lam * N_experts * (ema_subset * P_live).sum()
@@ -469,12 +480,29 @@ def train(args):
         loss_ldm = F.mse_loss(noise_pred.float(), noise.float(), reduction="mean")
         loss = loss_ldm + loss_entropy
 
-        loss.backward()
-
-        torch.nn.utils.clip_grad_norm_(
-            model.encoder.parameters(), args.gradient_clip
-        )
-        optimizer.step()
+        # Guard: skip update on NaN/Inf loss OR NaN/Inf gradients.
+        # fp16 UNet backward can produce Inf gradients; clip_grad_norm_ then
+        # returns Inf, and Inf*0=NaN (IEEE 754) would corrupt encoder params.
+        # Fix: sanitize gradient elements individually with nan_to_num_ BEFORE
+        # clipping.  Finite elements still contribute; only the overflowed
+        # positions are zeroed.  The step always proceeds when loss is finite.
+        if torch.isfinite(loss):
+            loss.backward()
+            # Zero any Inf/NaN gradient elements in-place before clipping
+            had_bad_grad = False
+            for p in model.encoder.parameters():
+                if p.grad is not None:
+                    if not torch.isfinite(p.grad).all():
+                        p.grad.nan_to_num_(nan=0.0, posinf=0.0, neginf=0.0)
+                        had_bad_grad = True
+            if had_bad_grad:
+                running_skipped += 1
+            torch.nn.utils.clip_grad_norm_(
+                model.encoder.parameters(), args.gradient_clip
+            )
+            optimizer.step()
+        else:
+            running_skipped += 1
 
         running_loss_ldm += loss_ldm.item()
         running_loss_ent += loss_entropy.item()
@@ -485,9 +513,11 @@ def train(args):
             avg_ldm = running_loss_ldm / args.log_every
             avg_ent = running_loss_ent / args.log_every
             avg_total = running_loss_total / args.log_every
+            n_skip = running_skipped
             running_loss_ldm = 0.0
             running_loss_ent = 0.0
             running_loss_total = 0.0
+            running_skipped = 0
             log(
                 f"step={step:6d}/{args.max_steps}  "
                 f"total={avg_total:.6f}  "
@@ -496,6 +526,7 @@ def train(args):
                 f"λ={lam:.4f}  "
                 f"τ={get_temperature(step, args.tau_start, args.tau_end, args.tau_warmup_steps):.3f}  "
                 f"top1={int(ema_expert_usage.argmax())}({ema_expert_usage.max():.3f})  "
+                f"skip={n_skip}  "
                 f"lr={lr:.2e}"
             )
 

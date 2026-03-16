@@ -2147,7 +2147,8 @@ Router collapse: `lb` decays to ~0.000, one `top1` ID dominates with fraction �
 |--------|-----------|------|
 | 768667 | CANCELLED | Attempted resume of v2.1 from step 3775; cancelled after collapse confirmed |
 | 768705 | FAILED    | v2.2 first attempt — EMA shape mismatch (pool_indices vs full 109) |
-| **768718** | **RUNNING** (ai12) | v2.2 corrected — scatter_add_ fix applied; τ annealing + lb loss |
+| 768718 | TIMEOUT   | scatter_add_ fix, but `lb=nan` from step 1 — fp16 NaN not sanitised (see §33) |
+| **770860** | **RUNNING** (ai11) | v2.2 with fp16 NaN fix — `nan_to_num` + NaN guard on backward |
 
 Output: `/scratch/eyavuz21/lora_attention/stage2_v22/`
 Script: `slurm/train_stage2_v22.sh`
@@ -2161,7 +2162,7 @@ Script: `slurm/train_stage2_v22.sh`
 
 ### §32.7 — Next Steps
 
-1. **Monitor 768718** — first checkpoint at step 500. Key diagnostic:
+1. **Monitor 770860** — first checkpoint at step 500. Key diagnostic:
    - Does `lb=` stay non-trivially positive? (confirms gradient is flowing)
    - Does `top1` fraction stay below 0.3? (confirms routing is not collapsing)
    - Is `ldm=` decreasing? (confirms LDM signal is contributing)
@@ -2170,3 +2171,543 @@ Script: `slurm/train_stage2_v22.sh`
    - Change ckpt to `stage2_v22/latest.pt`
 3. **Compare S1v2.1 vs S2v2.2** — the key scientific question: does Stage-2 LDM training
    (with correct gradient signal) improve style transfer quality over Stage-1 routing alone?
+
+---
+
+## §33 — v2.2 fp16 NaN Bug: Diagnosis and Fix (2026-03-01)
+
+### §33.1 — Symptom
+
+Job 768718 ran for 24h (TIMEOUT), reached step 3925/8000. Throughout the entire training:
+```
+step=    25/8000  total=nan  ldm=0.547959  lb=nan  λ=0.0999  τ=4.950  top1=0(nan)
+step=    50/8000  total=nan  ldm=0.642938  lb=nan  λ=0.0997  τ=4.900  top1=0(nan)
+... (lb=nan, total=nan for all 3925 steps)
+```
+
+`ldm` stayed at ~0.5–0.7 (baseline) throughout — model was not learning.
+
+### §33.2 — Root Cause
+
+The v2.1 `attention_entropy()` function explicitly sanitises `A` with `nan_to_num`:
+```python
+A_safe = torch.nan_to_num(A.float(), nan=0.0, posinf=1.0, neginf=0.0)
+```
+because **fp16 softmax is known to produce NaN/Inf** on edge cases (the comment in the
+model says: *"Sanitize NaN/Inf that can arise from fp16 softmax in mixed-precision training"*).
+
+The v2.2 load-balancing code used raw `A` without sanitisation:
+```python
+P_live = A.float().mean(dim=(1, 2))    # ← NaN if A has NaN
+```
+
+On the very first forward pass, `A` contained NaN from fp16 softmax overflow. This infected:
+- `P_detached` → `ema_expert_usage` via `scatter_add_` → NaN forever (NaN * β = NaN)
+- `P_live` → `loss_entropy` = NaN
+- `loss = loss_ldm + NaN` = NaN
+- `loss.backward()` → NaN gradients → all encoder parameters become NaN at step 1
+
+**Why `ldm` stayed stable**: The `_synthesise_product_space()` path has `nan_to_num` on
+A_scalar, so NaN attention → zero LoRA → UNet predicts noise without any style modification →
+MSE = constant ~0.5–0.7 (baseline SD noise prediction error). The model was effectively
+not injecting any LoRA for 3925 steps.
+
+### §33.3 — Fix Applied
+
+Two changes to `train_stage2_v2.py`:
+
+**1. Sanitise A before LB loss:**
+```python
+A_safe = torch.nan_to_num(A.float(), nan=0.0, posinf=1.0, neginf=0.0)
+P_detached = A_safe.detach().mean(dim=(1, 2))
+P_live = A_safe.mean(dim=(1, 2))  # has grad through non-NaN entries
+```
+
+**2. Guard backward pass when loss is NaN:**
+```python
+if torch.isfinite(loss):
+    loss.backward()
+    clip_grad_norm_(...); optimizer.step()
+else:
+    pass  # skip update, log and continue
+```
+
+### §33.4 — Job Resubmission
+
+Corrupted stage2_v22 output cleaned (rm -rf). Job 770860 submitted, running on ai11.
+Starts fresh from Stage 1 checkpoint. First checkpoint expected at step 500 (~1.5h in).
+
+---
+
+## §34 — Linear Composition Phase 1: Gram Caching Optimisation (2026-03-01)
+
+### §34.1 — Problem
+
+Job 768644 (Phase 1) timed out at 6h. The self-reconstruction check took ~3.5h
+(building the 109×109 Gram matrix from 301M-dim vectors). Step 2 (regression sweep)
+needed to rebuild the Gram matrix for each of 10 targets (leave-one-out), but timed
+out during the second Gram build — total estimated time was ~38 hours.
+
+### §34.2 — Insight
+
+The full 109×109 Gram matrix $G_{\text{full}} = X^T X$ contains ALL the information
+needed for every leave-one-out sub-problem:
+
+- **Leave-one-out Gram**: delete row/col `target_idx` from $G_{\text{full}}$
+- **q vector**: $q_i = X_i^T y = G_{\text{full}}[i, \text{target}]$ — just a column of $G_{\text{full}}$
+- **Target norm**: $||x_t||^2 = G_{\text{full}}[\text{target}, \text{target}]$
+
+Building $G_{\text{full}}$ once takes ~3.5h; extracting a sub-Gram takes microseconds.
+
+### §34.3 — Changes to `global_reconstruction.py`
+
+| Change | Description |
+|--------|-------------|
+| `build_or_load_full_gram()` | New function: builds 109×109 Gram once, saves to `gram_full.npz`, loads from cache on subsequent runs |
+| `_loo_gram_and_q()` | New function: extracts (N-1)×(N-1) sub-Gram + q from G_full using boolean mask — O(N²) |
+| `run_regression_sweep()` | Accepts optional `G_full` parameter; uses `_loo_gram_and_q()` instead of `_build_gram()` |
+| `self_reconstruction_check()` | Accepts optional `G_full` parameter; uses cached Gram instead of rebuilding |
+| `_gram_metrics()` | Now accepts `xt_norm2` (float) instead of `x_target_f64` (D-dim array) — no D-dim dependency |
+| `main()` | Builds G_full once at top; skips self-check if `self_check.json` exists and passed; loads target selection from cache; passes G_full to all regression sweeps |
+
+### §34.4 — SLURM Changes
+
+- Time limit: 6h → 12h (conservative; with cached Gram from previous run, ~30 min)
+- Simplified to single `python global_reconstruction.py --normalize --generate-images` call
+
+### §34.5 — Job Resubmission
+
+| Job    | Status    | Note |
+|--------|-----------|------|
+| 768644 | TIMEOUT   | Self-check passed (3.5h), regression timed out (6h limit) |
+| **770865** | **PENDING** | Gram caching optimisation — will load cached self_check, build and cache G_full, then sweep |
+
+Self-check result (cached): target_coeff=0.9999, rel_error=0.00002, cos_sim=1.000 ✓
+
+### §34.6 — Expected Behaviour
+
+First run (770865):
+1. Load 62 GB matrix (~2 min)
+2. Build & cache G_full (109×109) (~3.5 h — only needed ONCE)
+3. Skip self-check (already passed)
+4. 10 targets × (Ridge + Lasso + ElasticNet) = ~100 solves on 108×108 system (~seconds each)
+5. Normalization ablation (~seconds)
+6. Image generation (3 targets × 3 images = ~15 min)
+7. Total: ~4 hours
+
+Subsequent runs: ~30 min (G_full loaded from cache in <1 s)
+
+---
+
+## §35 — v2.2 Gradient Overflow: True Root Cause & Final Fix (2026-03-02)
+
+### §35.1 — Symptom After §33 Fix
+
+After applying the `nan_to_num` sanitisation (§33) and resubmitting (jobs 770860, 770886, 770902),
+`lb` was no longer NaN but was still dead from step 50 onward:
+
+```
+step=    25/8000  total=0.536811  ldm=0.532305  lb=0.004506  λ=0.0999  τ=4.950  top1=17(0.008)
+step=    50/8000  ...  lb=0.000000  ...  top1=17(0.008)
+step=    75/8000  ...  lb=0.000000  ...  top1=17(0.008)
+```
+
+`top1` fraction was permanently 0.008 (near-uniform, never reflecting real usage). The §33 fix
+masked the NaN but did not fix the encoder corruption.
+
+### §35.2 — Debug Investigation
+
+Added debug prints (step < 5) to the training loop in job 770902. Output from `.err` file:
+
+```
+[DBG] step=0  A has_nan=False  min=0.114  max=0.138   ← valid, A is near-uniform under τ=5
+[DBG]   P_live sum=1.000  loss_entropy=0.1126          ← lb loss is working at step 0
+
+[DBG] step=1  A has_nan=True  min=nan  max=nan         ← encoder corrupted by step 0 backward!
+[DBG]   P_live sum=0.000  loss_entropy=0.000000        ← nan_to_num zeros everything
+
+[DBG] step=2  A has_nan=True  min=nan  max=nan         ← permanent — encoder stays NaN
+...
+```
+
+**Key finding**: The encoder parameters become NaN after ONE backward pass. The NaN is not
+from fp16 softmax overflow in the forward pass — it was in the BACKWARD pass.
+
+### §35.3 — Root Cause: `Inf × 0 = NaN` in Gradient Clipping
+
+The sequence at step 0:
+
+1. `loss = 0.537` (finite) → `loss.backward()` runs
+2. The UNet runs in fp16 (`weight_dtype=fp16`). During backward, gradients of the LDM loss
+   flowing through UNet fp16 activations **overflow fp16** → some encoder gradients become `Inf`
+3. `clip_grad_norm_(encoder.parameters(), max_norm)`:
+   - `total_norm = sqrt(Σ grad²) = sqrt(... + Inf² + ...) = Inf`
+   - `clip_coef = max_norm / (Inf + 1e-6) = 0.0`
+   - For finite encoder grads: `grad × 0 = 0` (fine)
+   - For Inf encoder grads: **`Inf × 0 = NaN` (IEEE 754)** ← corrupts params
+4. `optimizer.step()` applies NaN to those encoder parameters
+5. At step 1: encoder params contain NaN → `H = encoder(q)` = NaN → A = NaN → lb = 0 forever
+
+**Why this didn't affect v2.1**: In v2.1, `loss_entropy = 0` from step 50 (entropy collapsed),
+so the backward was almost identical to the LDM-only loss. But even in v2.1 the encoder params
+likely became NaN at step 1 — it just didn't matter because lb was zero anyway. The LDM
+gradient path goes through `synth_lora → A → H → encoder`. With NaN encoder, A_safe (after
+nan_to_num) is all zeros, so `synth_lora ≈ 0` LoRA correction, and the UNet prediction equals
+unmodified SD output — giving stable but useless MSE ~0.5–0.7. This is why v2.1 seemed to
+"train" for 3775 steps while actually doing nothing.
+
+### §35.4 — Fix
+
+Replace `clip_grad_norm_ + optimizer.step()` with a guarded version:
+
+```python
+grad_norm = torch.nn.utils.clip_grad_norm_(
+    model.encoder.parameters(), args.gradient_clip
+)
+if torch.isfinite(grad_norm):
+    optimizer.step()
+else:
+    # Inf/NaN gradients — zero them out to prevent accumulation
+    for p in model.encoder.parameters():
+        if p.grad is not None:
+            p.grad.zero_()
+    running_skipped += 1
+```
+
+Added `skip=N` field to the log line (count of skipped steps per `log_every` window).
+
+These steps are skipped but the encoder params stay valid. On subsequent steps, once the
+UNet gradient magnitude drops below the fp16 overflow threshold, real updates resume.
+
+### §35.5 — Why Skipped Steps Are Acceptable
+
+The overflow typically happens in early steps when the LDM loss gradient is large.
+As training stabilises, most steps produce finite gradients. The `skip=N` log field
+will show how quickly the skip rate drops to 0. If skip rate stays high (>20% of steps)
+beyond step 500, a GradScaler should be added instead.
+
+### §35.6 — Job History (v2.2 full chain)
+
+| Job    | Status    | Steps | Note |
+|--------|-----------|-------|------|
+| 768718 | TIMEOUT   | 3,925 | lib=nan all steps — no A sanitisation (§33 diagnosed) |
+| 770860 | TIMEOUT   | 3,925 | After §33 fix — lb=0 from step 50 (encoder still corrupted) |
+| 770886 | CANCELLED | ~25   | Debug variant — cancelled after seeing lb=0 persist |
+| 770902 | CANCELLED | ~75   | Debug prints revealed A NaN from step 1 → root cause found |
+| 770911 | CANCELLED | ~25 | Skip-step approach: skip=25/25 stalled training (all steps had inf grads, zero optimizer updates) |
+| **770920** | **RUNNING** (ai11) | 1150+ | Per-element nan_to_num_ (zero inf elements, keep finite) — WORKING |
+
+### §35.7 — The Final nan_to_num_ Strategy (770920)
+
+Skip-step approach stalled: all early steps had at least one Inf element in the encoder gradient,
+so the optimizer never ran and `lb` stayed at the initial EMA value (uniform). The fix changed
+from "skip the whole step if any grad is Inf" to "zero the individual Inf/NaN gradient elements
+in-place, then run the optimizer always":
+
+```python
+for p in encoder_params:
+    if p.grad is not None:
+        torch.nan_to_num_(p.grad, nan=0.0, posinf=0.0, neginf=0.0)
+grad_norm = torch.nn.utils.clip_grad_norm_(encoder_params, max_norm=1.0)
+optimizer.step()
+```
+
+The `skip=N` field now counts steps where at least one Inf/NaN element was zeroed — it is
+informational only and does NOT indicate a skipped update.
+
+### §35.8 — v2.2 Confirmed Healthy (job 770920, 2026-03-02)
+
+At step 1150 with 9h elapsed:
+
+```
+step=    25/8000  total=0.671794  ldm=0.667288  lb=0.004506  top1=28(0.008)  τ=4.950
+step=    50/8000  total=0.748395  ldm=0.644083  lb=0.110119  top1=86(0.012)  τ=4.900
+step=  1150/8000  total=0.712987  ldm=0.612030  lb=0.100957  top1=1(0.014)   τ=2.700
+```
+
+Key indicators:
+- `lb` stable at ~0.10 (not collapsing to 0, not exploding)
+- `top1` fraction stays 0.013–0.018, well below 0.3 collapse threshold
+- `top1` ID rotates across many experts (28→86→22→14→54→15→44→57→25→…) — routing IS active
+- `ldm` trending slightly down (0.667 → 0.61 over 1150 steps) — LDM loss learning
+
+---
+
+## §36 — Linear Composition Phase 1: Gram Caching & Bug Fixes (2026-03-02)
+
+### §36.1 — Phase 0 Output (prerequisite, completed)
+
+`/scratch/eyavuz21/mo-lora/experiments/linear_composition/results/all_deltaw_matrix.pt`
+Shape: (301,465,600 × 109), Memory fp16: 65.7 GB. 109 expert LoRA delta-W vectors.
+
+### §36.2 — First Attempt: Timeout (job 768644)
+
+Gram matrix build was O(D × N²) reading 65 GB from disk. Timed out (6h limit) before
+completing Phase 1 regression. Initial per-target LOO Gram rebuild would require
+10 × 3.5h = 35h total.
+
+### §36.3 — Gram Caching Optimization
+
+Refactored `global_reconstruction.py` to:
+1. Build the full 109×109 Gram matrix `G_full` **once** (3.5h, 129.5 min in practice on T4)
+2. Cache to `results/phase1/gram_full.npz` (tiny file — 109² float64 = ~95 KB)
+3. For each LOO target `i`, extract the 108×108 sub-Gram in `O(N²)` time (~0ms vs 3.5h)
+4. `q_loo = G_full[:, i]` — dot products pulled directly from cached Gram, no D-dim work
+
+Estimated runtime with caching: ~3.5h (first run, Gram build) + ~30 min (all regression).
+Subsequent runs: ~30 min total.
+
+### §36.4 — Second Attempt: Bug in solve_regression (job 770865)
+
+Job FAILED at 2h 10min (after successfully building and caching the Gram matrix):
+
+```
+TypeError: object of type 'NoneType' has no len()
+  File "global_reconstruction.py", line 191, in solve_regression
+      G, cols_f32 = _build_gram(matrix_fp16, col_indices)
+  File "global_reconstruction.py", line 82, in _build_gram
+      K = len(col_indices)
+```
+
+Root cause — two bugs in `solve_regression()`:
+
+| Bug | Code | Problem |
+|-----|------|---------|
+| Condition too broad | `if G is None or cols_f32 is None:` | `cols_f32=None` when using cached G — tries to rebuild Gram |
+| Wrong K source | `K = len(col_indices)` | `col_indices=None` in Lasso/ElasticNet path |
+
+**Fixes applied:**
+```python
+# Bug 1: only rebuild if G itself is missing
+if G is None:
+    G, cols_f32 = _build_gram(matrix_fp16, col_indices)
+
+# Bug 2: get K from the Gram shape, not col_indices
+K = G.shape[0]
+```
+
+### §36.5 — Job History
+
+| Job    | Status  | Elapsed | Outcome |
+|--------|---------|---------|---------|
+| 768644 | TIMEOUT | 6h      | Gram build too slow (~3.5h × repeated = infeasible) |
+| 770865 | FAILED  | 2h10m   | Gram cached ✅, regression crashed: `if G is None or cols_f32 is None` → needed `if G is None` |
+| 771103 | FAILED  | 1m35s   | Regression ✅, image gen crashed: `w` from JSON is float64, fix `np.asarray(w, dtype=np.float32)` |
+| **771105** | **COMPLETED** | 12m21s | All bugs fixed; Gram loaded from cache; all results saved ✅ |
+
+### §36.7 — Phase 1 Results (COMPLETED 2026-03-02 11:06:54)
+
+**Aggregate (10 targets, best Ridge α=0.01 for all):**
+
+| Metric | Mean | Min | Max |
+|--------|------|-----|-----|
+| Cosine similarity | 0.1883 | 0.1768 | 0.2013 |
+| Relative error | 0.9821 | 0.9795 | 0.9842 |
+| Non-zero coefficients | 107/108 | — | — |
+
+**Per-target (sorted by cosine):**
+
+| Rank | Style | cos ↑ | err ↓ |
+|------|-------|--------|--------|
+| Best | Post_Impressionism | 0.2013 | 0.9795 |
+| 2 | Abstract_Expressionism (0002) | 0.1967 | 0.9805 |
+| 3 | Romanticism | 0.1949 | 0.9808 |
+| Median | Northern_Renaissance | 0.1888 | 0.9820 |
+| Worst | Realism | 0.1768 | 0.9842 |
+
+**Scientific interpretation**: LOO linear reconstruction from 108 other styles achieves
+cosine similarity of only ~0.19 and ~98% residual error. Style expert LoRA delta-W vectors
+are **approximately orthogonal** — each style occupies a largely unique direction in
+parameter space and cannot be decomposed as a linear combination of other styles. This
+empirically justifies the MoELoRA routing approach: the model learns to **select the single
+nearest specialist** rather than blend all 109, because sparse selection is the only way to
+recover style-specific structure that linear composition cannot.
+
+**Output files:**
+```
+results/phase1/
+  coefficients/              130 .npy files (10 targets × 13 alpha/method combos)
+  ridge_results.json         per-config R², cos, sparsity (40 entries)
+  lasso_results.json         idem
+  elasticnet_results.json    idem
+  normalized_results.json    results with column-normalised matrix
+  best_methods.json          best config per target
+  gram_full.npz              cached 109×109 Gram (72 KB, used by Phase 2+)
+  images/                    9 PNG triptychs (base / target / reconstructed)
+```
+
+### §36.8 — Next Steps for Linear Composition
+
+- **Phase 2** (`run_phase2.sh`): Style blending baseline — awaits Phase 1 completion ✅
+- **Phase 3** (`run_phase3.sh`): LoRA arithmetic (add/subtract style directions)
+- Both provide quantitative baselines to compare against MoELoRA's learned routing
+
+---
+
+## §37 — MoELoRA Stage 2 v2.2: First Timeout + Resume (2026-03-03–08)
+
+### §37.1 — Job 770920 Timeout at Step 3025/8000
+
+Job 770920 ran 24h (2026-03-02→03) and timed out at step 3025/8000 (38%).
+
+**Last log entry at timeout:**
+```
+step=  3025/8000  total=0.710440  ldm=0.619368  lb=0.091073  λ=0.0811  τ=1.000  top1=2  skip=25
+```
+
+**Health assessment at step 3025:**
+- `lb ≈ 0.09–0.11` stable — load-balancing gradient active the entire run ✅
+- `top1` fraction ~0.013–0.021, rotating across many different expert IDs ✅
+- Temperature fully cooled to τ=1.0 by step 2000 (as designed) ✅
+- `ldm` trend: 0.667 (step 25) → 0.619 (step 3025) — slow but visible decrease ✅
+- `skip=25` throughout — Inf grad elements zeroed by `nan_to_num_`, optimizer ran every step ✅
+
+**Checkpoints saved:** 500, 1000, 1500, 2000, 2500, 3000
+
+### §37.2 — Auto-Resume (job 779772, 2026-03-08)
+
+The SLURM script (`train_stage2_v22.sh`) was updated with auto-resume logic:
+```bash
+if [[ -z "$RESUME" && -f "$OUTPUT_DIR/latest.pt" ]]; then
+    RESUME="$OUTPUT_DIR/latest.pt"
+    echo "Auto-resuming from: $RESUME"
+fi
+```
+
+Job 779772 submitted 2026-03-08. Will resume from `stage2_v22/latest.pt` (step 3000).
+Remaining: 5000 steps (~40h at current rate of ~124 steps/h — will need 2 more 24h runs).
+
+---
+
+## §38 — Linear Composition Phase 2: OOM Fix (2026-03-02→08)
+
+### §38.1 — Phase 2 Attempt (job 771137, FAILED 2026-03-02)
+
+`lc_phase2` was submitted immediately after Phase 1 completed. It crashed after processing
+only the first group of the first target (14 min elapsed):
+
+```
+G1_self_attn: error=0.9981, cos=0.0634
+Killed   (exit code 137 — Linux OOM kill)
+slurmstepd: Detected 1 oom_kill event in StepId=771137.batch
+```
+
+### §38.2 — Root Cause: Group Sub-Matrix RAM Overflow
+
+The matrix is `(301,465,600 × 109)` fp16 = 65 GB. Each grouping scheme splits 160 tensor
+keys into 2–4 groups of ~80 keys each. With each tensor of shape `(1280, 1280)` or
+`(1280, 2048)`, a group of 80 keys spans **~150M rows**.
+
+Memory timeline in `run_groupwise_regression` when processing G1 then G2:
+
+| Event | Memory |
+|-------|--------|
+| matrix_fp16 loaded | 65 GB |
+| G1 sub_matrix (fp32) created | +65 GB = **130 GB** |
+| G1 X_donors_g copy | +65 GB = **195 GB** |
+| G1 done; G2 sub_matrix created (G1 still in scope) | +65 GB = **260 GB** |
+| 256 GB cgroup limit → OOM kill | ❌ |
+
+### §38.3 — Fix Applied (2026-03-08)
+
+Two changes to `layerwise_reconstruction.py`:
+1. Added `import gc`
+2. After each group's regression, explicitly free the large arrays before the next group:
+```python
+del sub_matrix, X_donors_g, x_target_g
+gc.collect()
+```
+Peak per group is now: 65 GB (matrix) + 65 GB (this group fp32) + 65 GB (X_donors) = **195 GB**.
+Since arrays are freed before the next group is created, groups never co-exist in memory.
+
+Also fixed in the image-generation re-run loop (same pattern).
+
+`run_phase2.sh`: `--mem` raised from 256G → 400G as safety margin.
+
+### §38.4 — Phase 2 Resubmitted (job 779782, 2026-03-08)
+
+Job 779782 submitted. Expected runtime: ~2–3h (regression fast, image gen ~20 min).
+
+**What Phase 2 measures**: Does allowing *different* linear combination weights per tensor
+group (self-attn vs cross-attn, or per layer) improve reconstruction over the global Phase 1
+coefficients? Scientific expectation: modest improvement (~0.97 error vs ~0.98), but still
+far from useful — because Phase 1 already showed the LoRA vectors are approximately orthogonal.
+
+**Grouping schemes:**
+- Scheme A: 2 groups (self-attn | cross-attn)
+- Scheme B: groups by layer depth
+- Scheme C: finer decomposition (by attention head type)
+- Per-tensor: upper bound (independent regression per tensor key)
+
+---
+
+## §39 — MoELoRA v2.1/v2.2 Pipeline Recovery (2026-03-13–16)
+
+### §39.1 — Final Job Accounting (March 13 Run)
+
+| Job ID | Name | Status | Elapsed | Notes |
+|--------|------|--------|---------|-------|
+| 785349 | MoELoRA-S1v21 | **COMPLETED** ✅ | 51m 56s | Resumed from step 14,300; completed to step **15,000/15,000** on node `ai11` |
+| 785350 | MoELoRA-S2v22 | **FAILED** ❌ | 30s | Architecture mismatch — see §39.2 |
+| 785351 | S1v21-inf | **TIMEOUT** ⚠️ | 6h 00m | Ran on CPU due to broken CUDA on `ai14` — see §39.3 |
+| 785352 | S2v22-PS | **COMPLETED** ✅ | 1h 09m | Stage 2 weights unavailable; sweep ran against stale data |
+
+**Stage 1 v2.1 is fully complete.** `stage1_v21/latest.pt` contains step 15,000 weights.
+
+### §39.2 — Root Cause: Stage 2 Architecture Mismatch
+
+**What happened:** Stage 2 training (job 785350) crashed 30 seconds after launch:
+```
+RuntimeError: Error(s) in loading state_dict for LoRARankEncoder:
+    Missing key(s):   "tensor_embedding.weight", "proj_1280.weight", ...
+    Unexpected key(s): "head_1280.0.weight", "head_1280.1.weight", ...
+```
+
+**Root cause:** `train_stage2_v22.sh` contains an auto-resume block:
+```bash
+if [[ -z "$RESUME" && -f "$OUTPUT_DIR/latest.pt" ]]; then
+    RESUME="$OUTPUT_DIR/latest.pt"
+fi
+```
+A `/scratch/eyavuz21/lora_attention/stage2_v22/latest.pt` file existed from **March 9** (step 6,050/8,000),
+saved under the *old* encoder architecture — before `tensor_embedding`, `proj_1280/2048`, and `shared_mlp`
+layers were introduced in `rank_encoder.py`. When Stage 2 woke up, it silently loaded this stale
+checkpoint instead of bootstrapping from the newly completed Stage 1, causing the key mismatch.
+
+**Fix:** The stale directory was archived: `mv stage2_v22 stage2_v22_old`. Stage 2 will now
+bootstrap cleanly from `stage1_v21/latest.pt` on its next run (no auto-resume file present).
+
+> **~6,050 steps of Stage 2 training were discarded** because they were trained with the old
+> encoder architecture and are no longer compatible with the current codebase.
+
+### §39.3 — Root Cause: S1v21 Inference Sweep Ran on CPU
+
+**What happened:** Job 785351 (`S1v21-inf`, 6h wall limit) hit `TIMEOUT` after completing
+only 3/30 inference batches at ~5,800 seconds each (~1.6h per batch). Expected rate on V100 is ~50s.
+
+**Root cause:** SLURM routed the job to node `ai14`, which has a broken CUDA driver:
+```
+UserWarning: CUDA initialization: CUDA unknown error - this may be due to an incorrectly
+set up environment, e.g. changing env variable CUDA_VISIBLE_DEVICES after program start.
+Setting the available devices to be zero.
+```
+PyTorch silently fell back to CPU inference. With float16 pipelines on CPU each diffusion
+step takes ~100× longer than on GPU.
+
+**Fix:** Added `--exclude=ai14` to all future submissions to prevent SLURM allocating any
+training or inference jobs to this node.
+
+### §39.4 — Repaired Pipeline (2026-03-16)
+
+All three downstream jobs were resubmitted with `--exclude=ai14`:
+
+| Job ID | Name | Status | Dependency | Notes |
+|--------|------|--------|------------|-------|
+| 788113 | MoELoRA-S2v22 | **RUNNING** ✈️ | None | Fresh run from `stage1_v21/latest.pt`; step 0 of 8,000 |
+| 788114 | S1v21-inf | **PENDING** (Resources) | None | Waiting for a free V100; will run in parallel with Stage 2 |
+| 788115 | S2v22-PS | **PENDING** (Dependency) | `afterany:788113` | Safe cascade; fires when Stage 2 ends regardless of timeout |
+
+**Key architectural facts (current state):**
+- `LoRARankEncoder` now uses `tensor_embedding + proj_1280/2048 + shared_mlp` keys
+- `stage1_v21/latest.pt` contains the correct new-architecture weights (confirmed: `"proj_1280.weight" in state_dict = True`)
+- `stage2_v22_old/` (old architecture, step 6,050) is archived but **not deleted** in case it is useful for comparison

@@ -247,8 +247,14 @@ def compute_kl_loss(
 # ──────────────────────────────────────────────────────────────
 # Training loop
 # ──────────────────────────────────────────────────────────────
+from accelerate import Accelerator
+
 def train(args):
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    accelerator = Accelerator(
+        gradient_accumulation_steps=1,
+        mixed_precision="fp16", # Fallback for now if needed, Stage 1 doesn't need much mixed precision though
+    )
+    device = accelerator.device
     print(f"[Stage1-v2] Device: {device}")
 
     # ── Pool ──────────────────────────────────────────────────
