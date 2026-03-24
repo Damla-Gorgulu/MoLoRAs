@@ -3,30 +3,81 @@ LoRAGenerator: style image → B-LoRA style-block weight tensors.
 
 Architecture
 ------------
-  pixel_values
-      │
-  CLIPVisionModel (frozen)   →  patch tokens  [B, N_patches+1, 768]
-      │
-  img_proj  Linear(768, d_model)              [B, N_patches+1, d_model]
-      │
-  nn.TransformerDecoder   (Q = learnable queries, K/V = image tokens)
-      queries  [n_queries, d_model]  →  [B, n_queries, d_model]
-      │
-  Per-shape-group Linear decoders
-      group_A  Linear(d_model, flat_A)  →  down [rank, 1280]  + up [1280, rank]
-      group_B  Linear(d_model, flat_B)  →  down [rank, 2048]  + up [1280, rank]
-      │
-  Reconstruct dict[key → Tensor]  (same keys/shapes as B-LoRA style block)
+  Style encoding (one of):
+
+  A) CLIP path (default ``style_encoder="clip"``)
+      pixel_values [B,3,H,W] (CLIP preprocessing)
+          → CLIPVisionModel (frozen) → patch tokens [B, N, 768]
+          → Linear(768, d_model)     → memory [B, N, d_model]
+
+  B) SDXL VAE latents (``style_encoder="vae_latents"``), same preprocessing as
+     ``train_dreambooth_b-lora_sdxl.py``: RGB in [-1,1], ``vae.encode``,
+     ``latent_dist.sample()``, then ``* vae.config.scaling_factor``.
+      scaled_latents [B, 4, h, w]
+          → Conv2d patch embed (4 → d_model) → memory [B, N, d_model]
+
+  Then (both paths):
+      nn.TransformerDecoder (Q = learnable queries, K/V = memory)
+          → per-shape Linear heads → dict of LoRA weights
 """
 
 from __future__ import annotations
 
 import math
-from typing import Optional
+from typing import Literal, Optional
 
 import torch
 import torch.nn as nn
+from diffusers import AutoencoderKL
 from transformers import CLIPVisionModel
+
+
+# ---------------------------------------------------------------------------
+# SDXL VAE loading (matches MoLoRAs/B-LoRA_files/train_dreambooth_b-lora_sdxl.py)
+# ---------------------------------------------------------------------------
+
+def load_sdxl_vae(
+    pretrained_model_name_or_path: str,
+    pretrained_vae_model_name_or_path: Optional[str] = None,
+    revision: Optional[str] = None,
+    torch_dtype: torch.dtype = torch.float32,
+) -> AutoencoderKL:
+    """
+    Load the same VAE as the B-LoRA SDXL script: either the ``vae`` subfolder
+    of the base model, or a standalone VAE checkpoint.
+    """
+    vae_path = (
+        pretrained_model_name_or_path
+        if pretrained_vae_model_name_or_path is None
+        else pretrained_vae_model_name_or_path
+    )
+    kwargs = {"torch_dtype": torch_dtype}
+    if revision is not None:
+        kwargs["revision"] = revision
+    return AutoencoderKL.from_pretrained(
+        vae_path,
+        subfolder="vae" if pretrained_vae_model_name_or_path is None else None,
+        **kwargs,
+    )
+
+
+def encode_rgb_to_scaled_latents(
+    vae: AutoencoderKL,
+    pixel_values: torch.Tensor,
+    sample: bool = True,
+) -> torch.Tensor:
+    """
+    B-LoRA / SDXL training convention: ``pixel_values`` in VAE dtype,
+    shape [B, 3, H, W], normalized to [-1, 1].
+
+    Returns scaled latents [B, 4, h, w] (``sample * scaling_factor``).
+    """
+    if sample:
+        dist = vae.encode(pixel_values).latent_dist
+        latents = dist.sample()
+    else:
+        latents = vae.encode(pixel_values).latent_dist.mode()
+    return latents * vae.config.scaling_factor
 
 
 # ---------------------------------------------------------------------------
@@ -52,6 +103,8 @@ class LoRAGenerator(nn.Module):
     n_heads    : int   Number of attention heads.
     n_layers   : int   Number of Transformer decoder layers.
     clip_model : str   HuggingFace model ID for the frozen CLIP vision encoder.
+    style_encoder : ``"clip"`` | ``"vae_latents"`` — what feeds the Transformer memory.
+    latent_patch_size : Patch stride for Conv2d embedding of VAE latents (4 → 64×64 lat → 16×16 tokens).
     dropout    : float Dropout applied inside the Transformer.
     """
 
@@ -62,19 +115,32 @@ class LoRAGenerator(nn.Module):
         n_heads: int = 8,
         n_layers: int = 4,
         clip_model: str = "openai/clip-vit-base-patch32",
+        style_encoder: Literal["clip", "vae_latents"] = "clip",
+        latent_patch_size: int = 4,
         dropout: float = 0.1,
     ):
         super().__init__()
 
-        # ---- frozen CLIP vision encoder ----
-        self.clip = CLIPVisionModel.from_pretrained(clip_model)
-        for p in self.clip.parameters():
-            p.requires_grad_(False)
+        self.style_encoder = style_encoder
+        self.latent_patch_size = latent_patch_size
 
-        clip_hidden = self.clip.config.hidden_size  # 768 for ViT-L/14
-
-        # ---- project CLIP tokens to d_model ----
-        self.img_proj = nn.Linear(clip_hidden, d_model)
+        if style_encoder == "clip":
+            self.clip = CLIPVisionModel.from_pretrained(clip_model)
+            for p in self.clip.parameters():
+                p.requires_grad_(False)
+            clip_hidden = self.clip.config.hidden_size
+            self.img_proj = nn.Linear(clip_hidden, d_model)
+            self.latent_patch = None
+        elif style_encoder == "vae_latents":
+            self.clip = None
+            self.img_proj = None
+            self.latent_patch = nn.Conv2d(
+                4, d_model,
+                kernel_size=latent_patch_size,
+                stride=latent_patch_size,
+            )
+        else:
+            raise ValueError(f"Unknown style_encoder: {style_encoder!r}")
 
         # ---- sort keys → deterministic query ordering ----
         self.keys: list[str] = sorted(key_shapes.keys())
@@ -129,25 +195,54 @@ class LoRAGenerator(nn.Module):
     # ------------------------------------------------------------------
     def encode_image(self, pixel_values: torch.Tensor) -> torch.Tensor:
         """
-        pixel_values : [B, 3, H, W]
+        pixel_values : [B, 3, H, W] (CLIP preprocessing)
         returns      : [B, N_patches+1, d_model]
         """
+        if self.style_encoder != "clip" or self.clip is None:
+            raise RuntimeError("encode_image requires style_encoder='clip'.")
         with torch.no_grad():
             outputs = self.clip(pixel_values=pixel_values)
-        # last_hidden_state includes CLS + patch tokens
-        img_tokens = outputs.last_hidden_state          # [B, N, 768]
-        return self.img_proj(img_tokens)                # [B, N, d_model]
+        img_tokens = outputs.last_hidden_state
+        return self.img_proj(img_tokens)
+
+    def encode_scaled_latents(self, scaled_latents: torch.Tensor) -> torch.Tensor:
+        """
+        scaled_latents : [B, 4, h, w] after VAE encode × ``scaling_factor`` (trainable path).
+
+        returns : [B, N, d_model] with N = (h / patch) * (w / patch).
+        """
+        if self.style_encoder != "vae_latents" or self.latent_patch is None:
+            raise RuntimeError("encode_scaled_latents requires style_encoder='vae_latents'.")
+        x = self.latent_patch(scaled_latents)
+        return x.flatten(2).transpose(1, 2).contiguous()
 
     # ------------------------------------------------------------------
-    def forward(self, pixel_values: torch.Tensor) -> dict[str, torch.Tensor]:
+    def forward(
+        self,
+        pixel_values: Optional[torch.Tensor] = None,
+        scaled_latents: Optional[torch.Tensor] = None,
+    ) -> dict[str, torch.Tensor]:
         """
-        pixel_values : [B, 3, H, W]
+        Provide exactly one of:
+
+        - ``pixel_values`` [B, 3, H, W] when ``style_encoder == "clip"``.
+        - ``scaled_latents`` [B, 4, h, w] when ``style_encoder == "vae_latents"``.
+
         Returns a dict mapping each LoRA key → Tensor of shape [B, *weight_shape].
         """
-        B = pixel_values.shape[0]
+        if (pixel_values is None) == (scaled_latents is None):
+            raise ValueError("Pass exactly one of pixel_values or scaled_latents.")
 
-        # Encode style image
-        memory = self.encode_image(pixel_values)         # [B, N, d_model]
+        if pixel_values is not None:
+            if self.style_encoder != "clip":
+                raise ValueError("pixel_values only valid for style_encoder='clip'.")
+            B = pixel_values.shape[0]
+            memory = self.encode_image(pixel_values)
+        else:
+            if self.style_encoder != "vae_latents":
+                raise ValueError("scaled_latents only valid for style_encoder='vae_latents'.")
+            B = scaled_latents.shape[0]
+            memory = self.encode_scaled_latents(scaled_latents)
 
         # Expand learnable queries to batch
         tgt = self.queries.unsqueeze(0).expand(B, -1, -1)  # [B, n_queries, d_model]

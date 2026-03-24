@@ -37,7 +37,11 @@ from tqdm.auto import tqdm
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from lora_generator.dataset import StyleLoRADataset, collate_fn
-from lora_generator.model import LoRAGenerator
+from lora_generator.model import (
+    LoRAGenerator,
+    encode_rgb_to_scaled_latents,
+    load_sdxl_vae,
+)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -324,10 +328,42 @@ def parse_args() -> argparse.Namespace:
     # Models
     p.add_argument("--sdxl_model_id", type=str,
                    default="stabilityai/stable-diffusion-xl-base-1.0")
-    p.add_argument("--vae_model_id", type=str,
-                   default="madebyollin/sdxl-vae-fp16-fix")
+    p.add_argument(
+        "--pretrained_vae_model_name_or_path",
+        type=str,
+        default=None,
+        help=(
+            "Same as train_dreambooth_b-lora_sdxl.py: load this VAE instead of "
+            "sdxl_model_id's subfolder vae/. If unset, see --vae_model_id."
+        ),
+    )
+    p.add_argument(
+        "--vae_model_id",
+        type=str,
+        default=None,
+        help=(
+            "Optional standalone VAE id/path (e.g. madebyollin/sdxl-vae-fp16-fix). "
+            "Used if --pretrained_vae_model_name_or_path is unset. "
+            "If both are unset, loads vae/ from --sdxl_model_id (B-LoRA default)."
+        ),
+    )
     p.add_argument("--clip_model_id", type=str,
                    default="openai/clip-vit-large-patch14")
+
+    # LoRA generator: CLIP pixels vs SDXL VAE latents (B-LoRA preprocessing)
+    p.add_argument(
+        "--style_encoder",
+        type=str,
+        choices=("clip", "vae_latents"),
+        default="vae_latents",
+        help="What conditions the generator: CLIP image tokens or VAE-scaled latents.",
+    )
+    p.add_argument(
+        "--latent_patch_size",
+        type=int,
+        default=4,
+        help="Conv patch stride for vae_latents memory (latent h,w must be divisible).",
+    )
 
     # LoRA generator architecture
     p.add_argument("--d_model", type=int, default=512)
@@ -405,11 +441,17 @@ def main() -> None:
         )
 
     # ── Dataset ──────────────────────────────────────────────────────────────
+    vae_hw = (
+        (args.generation_height, args.generation_width)
+        if args.style_encoder == "vae_latents"
+        else None
+    )
     dataset = StyleLoRADataset(
         checkpoint_dir=args.checkpoint_dir,
         image_dir=args.image_dir,
         clip_model_id=args.clip_model_id,
         cache_loras=True,
+        vae_image_size=vae_hw,
     )
     print(f"Dataset: {len(dataset)} styles → {dataset.styles}")
 
@@ -429,6 +471,8 @@ def main() -> None:
         n_layers=args.n_layers,
         n_heads=args.n_heads,
         clip_model=args.clip_model_id,
+        style_encoder=args.style_encoder,
+        latent_patch_size=args.latent_patch_size,
     ).to(device)
 
     trainable_params = [p for p in model.parameters() if p.requires_grad]
@@ -449,12 +493,21 @@ def main() -> None:
     time_ids = None
     latent_h = latent_w = None
 
-    if args.lambda_clip > 0:
-        print("Loading SDXL for CLIP image loss …")
-        vae = AutoencoderKL.from_pretrained(
-            args.vae_model_id, torch_dtype=torch.float16
+    vae_override = args.pretrained_vae_model_name_or_path or args.vae_model_id
+    need_vae = args.style_encoder == "vae_latents" or args.lambda_clip > 0
+    if need_vae:
+        print("Loading SDXL VAE (B-LoRA script convention: base subfolder or override) …")
+        vae = load_sdxl_vae(
+            args.sdxl_model_id,
+            pretrained_vae_model_name_or_path=vae_override if vae_override else None,
+            torch_dtype=torch.float32,
         ).to(device)
         vae.requires_grad_(False)
+
+    if args.lambda_clip > 0:
+        print("Loading SDXL for CLIP image loss …")
+        if vae is None:
+            raise RuntimeError("CLIP loss requires a VAE; this should not happen.")
 
         sdxl_pipe = StableDiffusionXLPipeline.from_pretrained(
             args.sdxl_model_id,
@@ -537,7 +590,15 @@ def main() -> None:
             optimizer.zero_grad()
 
             # ── Forward ────────────────────────────────────────────────
-            generated_lora = model(pixel_values)       # dict[key → [B, *shape]]
+            if args.style_encoder == "vae_latents":
+                if vae is None:
+                    raise RuntimeError("style_encoder=vae_latents requires VAE loading.")
+                vp = batch["vae_pixel_values"].to(device=device, dtype=vae.dtype)
+                with torch.no_grad():
+                    lat = encode_rgb_to_scaled_latents(vae, vp, sample=True)
+                generated_lora = model(scaled_latents=lat.float())
+            else:
+                generated_lora = model(pixel_values=pixel_values)
 
             # ── Loss 1: weight MSE ─────────────────────────────────────
             loss_w = sum(

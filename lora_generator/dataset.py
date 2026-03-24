@@ -1,12 +1,13 @@
 import os
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple
 
 import torch
 from torch.utils.data import Dataset
 from PIL import Image
 from safetensors import safe_open
+from torchvision import transforms
 from transformers import CLIPProcessor
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "B-LoRA_files"))
@@ -26,6 +27,7 @@ class StyleLoRADataset(Dataset):
 
     Returns:
         pixel_values  : Tensor [3, H, W] processed by CLIPProcessor (float32)
+        vae_pixel_values : optional Tensor [3, H_vae, W_vae] in [-1, 1] for SDXL VAE encode
         lora_dict     : dict[str, Tensor]  — style block LoRA weights
         style_name    : str
     """
@@ -38,12 +40,24 @@ class StyleLoRADataset(Dataset):
         image_dir: str,
         clip_model_id: str = "openai/clip-vit-large-patch14",
         cache_loras: bool = True,
+        vae_image_size: Optional[Tuple[int, int]] = None,
     ):
         self.checkpoint_dir = Path(checkpoint_dir)
         self.image_dir = Path(image_dir)
         self.cache_loras = cache_loras
+        self.vae_image_size = vae_image_size
 
         self.clip_processor = CLIPProcessor.from_pretrained(clip_model_id)
+
+        if vae_image_size is not None:
+            h, w = vae_image_size
+            self._vae_tf = transforms.Compose(
+                [
+                    transforms.Resize((h, w), interpolation=transforms.InterpolationMode.BILINEAR),
+                    transforms.ToTensor(),
+                    transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
+                ]
+            )
 
         self.styles = self._discover_styles()
         if len(self.styles) == 0:
@@ -108,11 +122,14 @@ class StyleLoRADataset(Dataset):
 
         lora_dict = self._load_lora(style)
 
-        return {
+        out = {
             "pixel_values": pixel_values,
             "lora_dict": lora_dict,
             "style_name": style,
         }
+        if self.vae_image_size is not None:
+            out["vae_pixel_values"] = self._vae_tf(image)
+        return out
 
 
 def collate_fn(batch: list[dict]) -> dict:
@@ -128,8 +145,11 @@ def collate_fn(batch: list[dict]) -> dict:
 
     style_names = [b["style_name"] for b in batch]
 
-    return {
+    out = {
         "pixel_values": pixel_values,
         "lora_dict": lora_batch,
         "style_names": style_names,
     }
+    if "vae_pixel_values" in batch[0]:
+        out["vae_pixel_values"] = torch.stack([b["vae_pixel_values"] for b in batch])
+    return out
