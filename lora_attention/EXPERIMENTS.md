@@ -5,6 +5,9 @@ this project.  It explains **what model was used**, **what prompt was given**,
 **what the style input was**, **what settings were applied**, and **what question
 each experiment was trying to answer**.
 
+For the live operational log of what is currently working, what failed, and what
+to try next, see [experiment_kb.md](./experiment_kb.md).
+
 ---
 
 ## Glossary
@@ -117,6 +120,38 @@ each experiment was trying to answer**.
 | Default synthesis | `product_space=True` — correct product-space SVD synthesis is now the default in code |
 | SLURM job | 762449 (submitted 2026-02-23, currently PENDING/RUNNING) |
 
+#### Mini canary: exact-instance routing
+
+We are also running a smaller exact-exemplar Stage 1 canary under
+`/scratch/eyavuz21/lora_attention/mini_exact_v1/` to test the real retrieval
+problem more directly:
+
+| Property | Value |
+|----------|-------|
+| Supervision | Exact exemplar image for each LoRA, not just the WikiArt category tag |
+| Positives | Style-preserving augmentations of the source exemplar |
+| Negatives | Mixed 4-expert pool, including same-category and cross-category distractors |
+| Styles | `Baroque`, `Cubism`, `Impressionism`, `Expressionism` |
+| Goal | Check whether routing becomes sharper when the label is tied to the actual LoRA source image |
+| SLURM job | 1007514 (training), 1007515 (validation, chained after training) |
+| Observed result | Validation top-1 = `1.000`, mean GT rank = `1.0`, entropy = `1.3753` |
+
+#### Mini neutral generalization replay
+
+This is the next retrospective benchmark after the exact mini canary.  The
+prompt stays neutral so we can check whether the style signal still appears on
+held-out singleton styles and on zero-shot styles that do not have a matching
+expert in the pool.
+
+| Property | Value |
+|----------|-------|
+| Checkpoints | `stage1_v21/latest.pt`, `stage2_v22/latest.pt`, `stage2_v23/latest.pt` |
+| Prompt | `A detailed painting` |
+| Query groups | Held-out singleton styles + zero-shot styles |
+| Routing modes | Soft routing and top-1 routing |
+| Goal | Check whether the neutral-prompt style effect survives beyond the exact mini canary |
+| Submission | `slurm/mini_generalization/submit_neutral_generalization_mini_v1.sh` |
+
 ---
 
 ## Experiment Index
@@ -132,6 +167,11 @@ each experiment was trying to answer**.
 | 7 | `s2v2_sweep/` | Stage 2 v2.0 | Legacy (buggy) | Same sweep with Stage 2 checkpoint — invalidated |
 | 8 | `s1v2_ps_sweep/` | Stage 1 v2.0 | **Product-space ✓** | First correct synthesis: does style transfer now work visually? |
 | 9 | `s2v2_ps_sweep/` | Stage 2 v2.0 | **Product-space ✓** | Same with Stage 2 checkpoint |
+| 10 | `mini_stage1_category/` | Stage 1 v2.1 mini | Routing-only | Coarse 4-style proxy to test whether the router learns at all |
+| 11 | `mini_stage1_exact/` | Stage 1 v2.1 mini | Routing-only | Exact-instance retrieval canary with exemplar-tied supervision |
+| 12 | `neutral_generalization_mini/` | v2.1/v2.2/v2.3 replay | Neutral | Does a neutral prompt still surface style transfer on held-out singleton and zero-shot queries? |
+| 13 | `neutral_alpha_sweep/` | v2.1/v2.2/v2.3 replay | Neutral + alpha sweep | Does increasing LoRA magnitude recover visible style transfer on old checkpoints? |
+| 14 | `mini_generalization_train_eval/` | Stage 1 v2.1 mini | CE routing + neutral replay | Can a compact WikiArt subset train a fresh checkpoint that generalizes under the neutral benchmark? |
 
 ---
 
@@ -568,3 +608,102 @@ across all 109 experts.  With uniform routing, every cross-term is equally
 weighted and the cancellation is maximal.
 
 **Fix:** Product-space synthesis (Exp 8, 9) — see §8 and §9 above.
+
+---
+
+## v2.3: Three-Stage Training Approach
+
+To address the training instability observed in v2.2 (flat LDM loss with no improvement), 
+v2.3 introduces a three-stage training approach:
+
+**Stage 1 - Warmup (steps 0-2000): LDM Loss Only**
+- Pure latent diffusion loss to learn meaningful routing for image quality
+- No load-balancing loss to avoid conflicting objectives early
+- Temperature: τ=1.0 → 2.0 (increase exploration/diversity)
+
+**Stage 2 - Balance (steps 2000-6000): LDM + LB Loss**
+- Add Switch-style load-balancing loss to encourage expert utilization
+- Temperature: τ=2.0 → 2.0 (maintain diversity)
+- Lambda: ramps up from 0 → 0.1
+
+**Stage 3 - Refine (steps 6000-8000): LDM + smaller LB Loss**
+- Reduce LB pressure for final refinement
+- Temperature: τ=2.0 → 0.3 (sharpen routing for exploitation)
+- Lambda: ramps down from 0.1 → 0.01
+
+**Key Improvements:**
+1. **SVD on GPU** - Fixed `_synthesise_product_space` to maintain gradient flow
+2. **Separated objectives** - LDM learns routing quality first, LB adds balance later
+3. **Smart temperature scheduling** - Exploration → diversity → exploitation
+4. **Reduced final lambda** - 0.01 instead of 0.05 to prevent over-regularization
+
+This approach allows the encoder to first learn how to route for image quality 
+(Stage 1), then balance expert usage (Stage 2), and finally refine to sharp 
+routing (Stage 3).
+
+---
+
+## Experiment 14 — `expA_inpool_next` Follow-Up and Identity Verdict
+
+**Run date:** 2026-04-26  
+**Job:** `1031909`  
+**Output:** `/scratch/eyavuz21/lora_attention/diagnostics/expA_inpool_next_20260426_162640`
+
+### Purpose
+
+After the first `mini_generalization_v2` replay looked partly encouraging on
+top-1 routing, this follow-up asked a stricter question:
+
+**Do the generated outputs actually match the query image's style identity, or
+do they only show a generic style/category effect?**
+
+### Setup
+
+For each query style (`Baroque`, `Cubism`, `Fauvism`), generate a side-by-side grid:
+
+- query image
+- base SDXL (`A detailed painting`)
+- direct reference B-LoRA
+- synthesized top-1 MoE LoRA
+- synthesized top-1 MoE LoRA with norm matching
+
+Checkpoint used:
+- `mini_generalization_v2/stage1_train/latest.pt`
+
+### Visual Verdict
+
+| Style | Verdict |
+|------|---------|
+| Baroque | A visible Baroque-like effect appears, but it does not faithfully match the query painting. |
+| Cubism | Does not match the expected top-1/query style; outputs drift to a different look. |
+| Fauvism | Norm-matched synthesis is somewhat closer, but still not exact; other outputs are black-and-white or unrelated. |
+
+### Interpretation
+
+This experiment rules out the comforting version of the story.
+
+- The system can change the image, so synthesis/injection is not completely dead.
+- Direct reference B-LoRA remains stronger than synthesized MoE outputs.
+- But the current pipeline does **not** preserve query-style identity reliably.
+
+So the present MoE setup should be treated as, at best, **style-category
+transfer**, not faithful query-specific style matching.
+
+### Consequence
+
+Future benchmarks should not stop at:
+
+- top-1 expert rank
+- visible stylization
+
+They must answer:
+
+- does the output match the query image's style identity?
+
+That is why the next benchmark is a tiny direct-vs-MoE identity check under a
+shared dog prompt family, using the same three query styles and comparing:
+
+- base SDXL
+- direct reference B-LoRA
+- MoE top-1
+- MoE norm-matched top-1

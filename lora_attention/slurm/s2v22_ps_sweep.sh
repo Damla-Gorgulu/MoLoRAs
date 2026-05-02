@@ -55,12 +55,16 @@ WIKIART="/home/eyavuz21/datasets/wikiart"
 ZOO_DIR="/home/eyavuz21/repos/B-LoRA/blora_zoo/bloras"
 STYLE_IMG_DIR="/home/eyavuz21/repos/B-LoRA/blora_zoo/style_images"
 CACHE_DIR="/scratch/eyavuz21/lora_attention"
-CKPT="/scratch/eyavuz21/lora_attention/stage2_v22/latest.pt"
-OUT_ROOT="/scratch/eyavuz21/lora_attention/s2v22_ps_sweep"
+CKPT="${STAGE2_CKPT:-/scratch/eyavuz21/lora_attention/stage2_v22/latest.pt}"
+RUN_TAG="${RUN_TAG:-s2v22_ps_$(date +%Y%m%d_%H%M%S)}"
+OUT_ROOT="/scratch/eyavuz21/lora_attention/s2v22_ps_sweep_runs/${RUN_TAG}"
 
 export PYTHONPATH="$REPO_ROOT:${REPO_ROOT}/../B-LoRA-fresh/B-LoRA:${PYTHONPATH:-}"
 
 mkdir -p "$OUT_ROOT"
+echo "CKPT:     $CKPT"
+echo "RUN_TAG:  $RUN_TAG"
+echo "OUT_ROOT: $OUT_ROOT"
 
 # ── Fixed settings ───────────────────────────────────────────
 SEED=42
@@ -110,6 +114,7 @@ run() {
         --num_inference_steps "$STEPS" \
         --guidance_scale "$GUIDANCE" \
         --seed         "$SEED" \
+        --run_tag      "$RUN_TAG" \
         --query_label  "$tag" \
         "${extra_args[@]}" \
     || { echo "  !! FAILED: $tag"; FAIL_COUNT=$((FAIL_COUNT + 1)); }
@@ -133,10 +138,10 @@ POOL_IMGS[cubism]="$STYLE_IMG_DIR/style_0003_Cubism/style_0003_Cubism.jpg"
 POOL_IMGS[impressionism]="$STYLE_IMG_DIR/style_0005_Impressionism/style_0005_Impressionism.jpg"
 POOL_IMGS[expressionism]="$STYLE_IMG_DIR/style_0010_Expressionism/style_0010_Expressionism.jpg"
 
-STYLE_PROMPTS[baroque]="A Baroque"
-STYLE_PROMPTS[cubism]="A Cubism"
-STYLE_PROMPTS[impressionism]="An Impressionism"
-STYLE_PROMPTS[expressionism]="An Expressionism"
+STYLE_PROMPTS[baroque]="A noble dog in Baroque style, oil portrait, ornate golden frame, dramatic chiaroscuro"
+STYLE_PROMPTS[cubism]="A dog in Cubism style, geometric fragmented planes, angular composition, muted modern palette"
+STYLE_PROMPTS[impressionism]="A dog in Impressionism style, soft brush strokes, outdoor garden light, pastel atmosphere"
+STYLE_PROMPTS[expressionism]="A dog in Expressionism style, emotional distortion, bold strokes, high-contrast vivid colors"
 
 NEUTRAL_PROMPTS[baroque]="A painting of a village scene"
 NEUTRAL_PROMPTS[cubism]="A painting of a still life"
@@ -162,9 +167,9 @@ REF_BLORAS[expressionism]="$ZOO_DIR/style_0010_Expressionism/pytorch_lora_weight
 echo ""
 echo "════════════ SWEEP 1: Product-space synth + style prompt ════════════"
 
-TEMPS=(0.005 0.05 0.5)
+TEMPS=(0.001 0.0025 0.004)
 TOPKS=(none 1)
-ALPHAS=(1.5 2.0 2.5)
+ALPHAS=(1.6 1.8 2.0 2.2 2.4)
 
 for style in "${STYLE_LIST[@]}"; do
     eval prompt="\${STYLE_PROMPTS[$style]}"
@@ -196,7 +201,7 @@ done
 echo ""
 echo "════════════ SWEEP 2: Product-space synth + NEUTRAL prompt ════════════"
 
-ALPHAS=(1.5 2.0 2.5)
+ALPHAS=(1.6 1.8 2.0 2.2 2.4)
 
 for style in "${STYLE_LIST[@]}"; do
     eval neutral="\${NEUTRAL_PROMPTS[$style]}"
@@ -209,7 +214,7 @@ for style in "${STYLE_LIST[@]}"; do
             eval img="\${POOL_IMGS[$style]}"
         fi
 
-        for temp in "0.005" "0.5"; do
+        for temp in "0.001" "0.004"; do
             for alpha in "${ALPHAS[@]}"; do
                 tag="${style}/${src}/ps_neutral_t${temp}_a${alpha}"
                 run "$tag" "$img" "$neutral" "$temp" "none" "$alpha" "none" "$gt" "true"

@@ -60,7 +60,9 @@ sys.path.insert(0, str(Path(__file__).parents[1]))
 from lora_attention.models.lora_pool import LoRAPool
 from lora_attention.models.moe_lora_v2 import MoELoRAv2
 from lora_attention.data.dataset import (
+    ExactExemplarStage1Dataset,
     WikiArtStage1Dataset,
+    exact_stage1_collate_fn,
     wikiart_stage1_collate_fn,
 )
 
@@ -87,6 +89,14 @@ def parse_args():
                         "'kl': soft KL vs CLIP-similarity targets (legacy).")
     p.add_argument("--label_map_path", type=str,
                    default="/scratch/eyavuz21/lora_attention/wikiart_label_map.json")
+    p.add_argument("--exact_manifest_path", type=str, default=None,
+                   help="Optional exact-exemplar manifest for mini retrieval runs.")
+    p.add_argument("--exact_views_per_style", type=int, default=32,
+                   help="Number of augmented views per exact exemplar style.")
+    p.add_argument("--exact_deterministic_val", action="store_true",
+                   help="Use deterministic augmentations for exact-exemplar runs.")
+    p.add_argument("--train_temperature", type=float, default=1.0,
+                   help="Attention temperature used during Stage 1 training.")
     p.add_argument("--resume_from", type=str, default=None,
                    help="Path to a v2.0 checkpoint to resume from.")
 
@@ -298,26 +308,42 @@ def train(args):
         )
 
     # ── Dataset ───────────────────────────────────────────────
-    sim_path = args.similarity_path if args.target_mode == "kl" else None
-    dataset = WikiArtStage1Dataset(
-        pool=pool,
-        wikiart_dir=args.wikiart_dir,
-        label_map_path=args.label_map_path,
-        similarity_path=sim_path,
-        tau_label=args.tau_label,
-        min_pool_size=args.min_pool_size,
-        max_pool_size=args.max_pool_size,
-        max_images_per_style=args.max_images_per_style,
-        rank=args.rank,
-        seed=args.seed,
-    )
+    if args.exact_manifest_path is not None:
+        if args.target_mode != "ce":
+            raise ValueError("--exact_manifest_path only supports --target_mode ce.")
+        dataset = ExactExemplarStage1Dataset(
+            pool=pool,
+            manifest_path=args.exact_manifest_path,
+            min_pool_size=args.min_pool_size,
+            max_pool_size=args.max_pool_size,
+            views_per_style=args.exact_views_per_style,
+            seed=args.seed,
+            deterministic_augment=args.exact_deterministic_val,
+        )
+        collate_fn = exact_stage1_collate_fn
+    else:
+        sim_path = args.similarity_path if args.target_mode == "kl" else None
+        dataset = WikiArtStage1Dataset(
+            pool=pool,
+            wikiart_dir=args.wikiart_dir,
+            label_map_path=args.label_map_path,
+            similarity_path=sim_path,
+            tau_label=args.tau_label,
+            min_pool_size=args.min_pool_size,
+            max_pool_size=args.max_pool_size,
+            max_images_per_style=args.max_images_per_style,
+            rank=args.rank,
+            seed=args.seed,
+        )
+        collate_fn = wikiart_stage1_collate_fn
+
     loader = DataLoader(
         dataset,
         batch_size=args.batch_size,
         shuffle=True,
         num_workers=args.num_workers,
         persistent_workers=(args.num_workers > 0),
-        collate_fn=wikiart_stage1_collate_fn,
+        collate_fn=collate_fn,
         drop_last=True,
     )
 
@@ -342,7 +368,10 @@ def train(args):
     log(f"Encoder params: {n_params:,}")
     log(f"Tensor groups: {T}")
     log(f"target_mode={args.target_mode}, max_steps={args.max_steps}, lr={args.lr}, batch={args.batch_size}")
-    log(f"τ_label={args.tau_label}, pool ∈ [{args.min_pool_size}, {args.max_pool_size}]")
+    log(
+        f"τ_label={args.tau_label}, train_temperature={args.train_temperature}, "
+        f"pool ∈ [{args.min_pool_size}, {args.max_pool_size}]"
+    )
     log(f"Dataset size: {len(dataset)}")
     log(f"{'='*60}")
 
@@ -379,7 +408,12 @@ def train(args):
             q = model.encode_image(image, device)  # (1, clip_dim)
 
             # Forward: routing attention only — skip synthesis to save GPU memory
-            A, _ = model.forward(q, pool_indices, temperature=1.0, synthesise=False)  # A: (N, T, r)
+            A, _ = model.forward(
+                q,
+                pool_indices,
+                temperature=args.train_temperature,
+                synthesise=False,
+            )  # A: (N, T, r)
 
             # Loss — CE (default) or KL (legacy)
             if args.target_mode == "ce":

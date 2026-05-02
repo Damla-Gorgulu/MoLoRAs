@@ -51,7 +51,9 @@ sys.path.insert(0, str(Path(__file__).parents[1]))
 from lora_attention.models.lora_pool import LoRAPool
 from lora_attention.models.moe_lora_v2 import MoELoRAv2
 from lora_attention.data.dataset import (
+    ExactExemplarStage2Dataset,
     WikiArtStage2Dataset,
+    exact_stage2_collate_fn,
     wikiart_stage2_collate_fn,
 )
 from lora_attention.utils.lora_inject import (
@@ -88,6 +90,13 @@ def parse_args():
     p.add_argument("--label_map_path", type=str,
                    default="/scratch/eyavuz21/lora_attention/wikiart_label_map.json")
     p.add_argument("--prompts_file", type=str, default=None)
+    p.add_argument("--exact_manifest_path", type=str, default=None,
+                   help="Optional exact-exemplar manifest for tiny Stage 2 follow-up runs.")
+    p.add_argument("--exact_views_per_style", type=int, default=32,
+                   help="Number of augmented views per exact exemplar style for Stage 2.")
+    p.add_argument("--exact_prompt_mode", type=str, default="neutral",
+                   choices=["neutral", "minimal", "style"],
+                   help="Prompt type for exact-exemplar Stage 2 runs.")
     p.add_argument("--stage1_ckpt", type=str, default=None,
                    help="v2.0 Stage 1 checkpoint to initialise encoder.")
     p.add_argument("--resume_from", type=str, default=None)
@@ -107,6 +116,12 @@ def parse_args():
     p.add_argument("--lora_alpha", type=float, default=1.0)
     p.add_argument("--no_normalize_keys", action="store_true")
     p.add_argument("--force_rebuild_cache", action="store_true")
+    p.add_argument("--product_synth", action="store_true",
+                   help="Use product-space synthesis during Stage 2 training. "
+                        "This is the recommended default.")
+    p.add_argument("--legacy_synth", action="store_false", dest="product_synth",
+                   help="Use legacy parameter averaging during Stage 2 training.")
+    p.set_defaults(product_synth=True)
 
     # Dataset
     p.add_argument("--min_pool_size", type=int, default=5)
@@ -124,17 +139,23 @@ def parse_args():
                    choices=["no", "fp16", "bf16"])
 
     # Entropy regularisation
+    p.add_argument("--lb_start_step", type=int, default=2000,
+                   help="Step when load-balancing loss starts (0 to disable).")
+    p.add_argument("--lb_end_step", type=int, default=6000,
+                   help="Step when load-balancing loss ends.")
     p.add_argument("--lambda_start", type=float, default=0.1,
                    help="Starting load-balancing loss weight.")
-    p.add_argument("--lambda_end", type=float, default=0.05,
-                   help="Final load-balancing loss weight (kept higher to prevent re-collapse).")
-    # Temperature annealing: start hot (near-uniform softmax) → cool to 1.0
-    p.add_argument("--tau_start", type=float, default=5.0,
-                   help="Initial softmax temperature (high → near-uniform routing).")
-    p.add_argument("--tau_end", type=float, default=1.0,
-                   help="Final softmax temperature.")
-    p.add_argument("--tau_warmup_steps", type=int, default=2000,
-                   help="Steps over which to anneal temperature from tau_start → tau_end.")
+    p.add_argument("--lambda_end", type=float, default=0.01,
+                   help="Final load-balancing loss weight.")
+    # Temperature: start sharp, cool for diversity in early training, then sharpen again
+    p.add_argument("--tau_start", type=float, default=1.0,
+                   help="Initial softmax temperature.")
+    p.add_argument("--tau_mid", type=float, default=2.0,
+                   help="Mid-training temperature (peak diversity).")
+    p.add_argument("--tau_end", type=float, default=0.3,
+                   help="Final softmax temperature (sharper routing).")
+    p.add_argument("--tau_mid_step", type=int, default=3000,
+                   help="Step when temperature reaches mid point.")
     p.add_argument("--ema_beta", type=float, default=0.99,
                    help="EMA decay for expert usage tracking in load-balancing loss.")
 
@@ -173,6 +194,26 @@ def get_temperature(step: int, tau_start: float, tau_end: float,
         return tau_end
     progress = min(step / tau_warmup_steps, 1.0)
     return tau_start + (tau_end - tau_start) * progress
+
+def get_temperature_v3(step: int, tau_start: float, tau_mid: float,
+                      tau_end: float, tau_mid_step: int, max_steps: int) -> float:
+    if step < tau_mid_step:
+        progress = step / max(1, tau_mid_step)
+        return tau_start + (tau_mid - tau_start) * progress
+    else:
+        progress = (step - tau_mid_step) / max(1, max_steps - tau_mid_step)
+        return tau_mid + (tau_end - tau_mid) * progress
+
+
+def get_lambda_lb(step: int, lb_start: int, lb_end: int,
+                  lam_start: float, lam_end: float) -> float:
+    if step < lb_start:
+        return 0.0
+    if step >= lb_end:
+        return 0.0
+    progress = (step - lb_start) / max(1, lb_end - lb_start)
+    return lam_start + (lam_end - lam_start) * progress
+
 
 
 def load_sdxl_pipeline(args, device):
@@ -308,23 +349,36 @@ def train(args):
     )
 
     # ── Dataset ───────────────────────────────────────────────
-    dataset = WikiArtStage2Dataset(
-        pool=pool,
-        wikiart_dir=args.wikiart_dir,
-        label_map_path=args.label_map_path,
-        min_pool_size=args.min_pool_size,
-        max_pool_size=args.max_pool_size,
-        max_images_per_style=args.max_images_per_style,
-        rank=args.rank,
-        seed=args.seed,
-        prompts_file=args.prompts_file,
-    )
+    if args.exact_manifest_path is not None:
+        dataset = ExactExemplarStage2Dataset(
+            pool=pool,
+            manifest_path=args.exact_manifest_path,
+            min_pool_size=args.min_pool_size,
+            max_pool_size=args.max_pool_size,
+            views_per_style=args.exact_views_per_style,
+            seed=args.seed,
+            prompt_mode=args.exact_prompt_mode,
+        )
+        collate_fn = exact_stage2_collate_fn
+    else:
+        dataset = WikiArtStage2Dataset(
+            pool=pool,
+            wikiart_dir=args.wikiart_dir,
+            label_map_path=args.label_map_path,
+            min_pool_size=args.min_pool_size,
+            max_pool_size=args.max_pool_size,
+            max_images_per_style=args.max_images_per_style,
+            rank=args.rank,
+            seed=args.seed,
+            prompts_file=args.prompts_file,
+        )
+        collate_fn = wikiart_stage2_collate_fn
     loader = DataLoader(
         dataset,
         batch_size=1,  # One sample at a time (variable N + GPU memory)
         shuffle=True,
         num_workers=0,
-        collate_fn=wikiart_stage2_collate_fn,
+        collate_fn=collate_fn,
         drop_last=True,
     )
 
@@ -390,8 +444,8 @@ def train(args):
             pg["lr"] = lr
 
         # Entropy regularisation weight
-        lam = get_lambda_entropy(
-            step, args.max_steps, args.lambda_start, args.lambda_end
+        lam = get_lambda_lb(
+            step, args.lb_start_step, args.lb_end_step, args.lambda_start, args.lambda_end
         )
 
         optimizer.zero_grad()
@@ -403,11 +457,13 @@ def train(args):
         # ── CLIP encode (expects PIL) ──────────────────────
         q = model.encode_image(image, device)  # (1, clip_dim)
 
-# ── Temperature-annealed forward ──────────────────
-        tau = get_temperature(step, args.tau_start, args.tau_end,
-                              args.tau_warmup_steps)
+        # ── Temperature-annealed forward ──────────────────
+        tau = get_temperature_v3(step, args.tau_start, args.tau_mid,
+                                 args.tau_end, args.tau_mid_step, args.max_steps)
+        # Use product-space synthesis so training and inference share the same
+        # composition rule. `--legacy_synth` is kept only for ablations.
         A, synth_lora = model.forward(q, pool_indices, temperature=tau,
-                                      product_space=True)
+                                      product_space=args.product_synth)
         # A: (N, T, r) with grad_fn
 
         # ── Switch-style load-balancing loss ──────────────
@@ -524,7 +580,7 @@ def train(args):
                 f"ldm={avg_ldm:.6f}  "
                 f"lb={avg_ent:.6f}  "
                 f"λ={lam:.4f}  "
-                f"τ={get_temperature(step, args.tau_start, args.tau_end, args.tau_warmup_steps):.3f}  "
+                f"τ={get_temperature_v3(step, args.tau_start, args.tau_mid, args.tau_end, args.tau_mid_step, args.max_steps):.3f}  "
                 f"top1={int(ema_expert_usage.argmax())}({ema_expert_usage.max():.3f})  "
                 f"skip={n_skip}  "
                 f"lr={lr:.2e}"

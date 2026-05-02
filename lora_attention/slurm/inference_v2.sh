@@ -63,6 +63,7 @@ NUM_IMAGES="${NUM_IMAGES:-4}"
 QUERY_LABEL="${QUERY_LABEL:-}"
 GT_EXPERT="${GT_EXPERT:-}"
 EXCLUDE="${EXCLUDE:-}"
+PRODUCT_SYNTH="${PRODUCT_SYNTH:-1}"
 
 mkdir -p "$OUTPUT_DIR"
 
@@ -72,7 +73,13 @@ echo "STYLE_IMAGE: $STYLE_IMAGE"
 echo "PROMPT:      $PROMPT"
 echo "TEMPERATURE: $TEMPERATURE"
 echo "OUTPUT_DIR:  $OUTPUT_DIR"
+echo "PRODUCT_SYNTH: $PRODUCT_SYNTH"
 echo "----------------------------------------"
+
+SYNTH_ARG="--product_synth"
+if [[ "$PRODUCT_SYNTH" == "0" ]]; then
+    SYNTH_ARG="--legacy_synth"
+fi
 
 "$PYTHON" "$SCRIPT" \
     --checkpoint   "$CHECKPOINT" \
@@ -84,6 +91,7 @@ echo "----------------------------------------"
     --temperature  "$TEMPERATURE" \
     --style_alpha  "$STYLE_ALPHA" \
     --num_images   "$NUM_IMAGES" \
+    $SYNTH_ARG \
     ${TOP_K:+--top_k "$TOP_K"} \
     ${QUERY_LABEL:+--query_label "$QUERY_LABEL"} \
     ${GT_EXPERT:+--gt_expert "$GT_EXPERT"} \

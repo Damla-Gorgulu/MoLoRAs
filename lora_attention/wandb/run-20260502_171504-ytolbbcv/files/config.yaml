@@ -1,0 +1,173 @@
+_wandb:
+    value:
+        cli_version: 0.26.1
+        e:
+            mk6euluqi6mp2styfqhyzwcvuxsjest7:
+                args:
+                    - --zoo_dir
+                    - /home/eyavuz21/repos/B-LoRA/blora_zoo/bloras
+                    - --output_dir
+                    - /scratch/eyavuz21/lora_autoencoder/overfit1_debug
+                    - --limit
+                    - "1"
+                    - --latent_dim
+                    - "41472"
+                    - --d_model
+                    - "512"
+                    - --num_layers
+                    - "4"
+                    - --num_heads
+                    - "8"
+                    - --batch_size
+                    - "1"
+                    - --max_steps
+                    - "1000"
+                    - --lr
+                    - "3e-4"
+                    - --tensor_weight
+                    - "1.0"
+                    - --delta_weight
+                    - "0.0"
+                    - --cos_weight
+                    - "0.0"
+                    - --rel_weight
+                    - "0.0"
+                    - --norm_weight
+                    - "0.0"
+                    - --log_every
+                    - "1"
+                    - --save_every
+                    - "250"
+                    - --wandb
+                    - --wandb_project
+                    - lora-autoencoder
+                    - --wandb_run_name
+                    - overfit1_debug
+                codePath: lora_attention/train_lora_autoencoder.py
+                codePathLocal: train_lora_autoencoder.py
+                cpu_count: 40
+                cpu_count_logical: 40
+                cudaVersion: "12.9"
+                disk:
+                    /:
+                        total: "75125227520"
+                        used: "5493862400"
+                email: eyavuz21@ku.edu.tr
+                executable: /home/eyavuz21/.conda/envs/B-LoRA_2/bin/python
+                git:
+                    commit: 9f6a702f534668a0198ee8778118d7dedd6ecba3
+                    remote: https://github.com/Damla-Gorgulu/MoLoRAs.git
+                gpu: Tesla V100-SXM2-32GB
+                gpu_count: 1
+                gpu_nvidia:
+                    - architecture: Volta
+                      cudaCores: 5120
+                      memoryTotal: "34359738368"
+                      name: Tesla V100-SXM2-32GB
+                      uuid: GPU-e2c051cf-b619-2259-a25b-8d27828d23bf
+                host: ai14.kuvalar.ku.edu.tr
+                memory:
+                    total: "540135505920"
+                os: Linux-4.18.0-513.24.1.el8_9.x86_64-x86_64-with-glibc2.28
+                program: /scratch/eyavuz21/home-moved/eyavuz21/repos/MoLoRAs/lora_attention/train_lora_autoencoder.py
+                python: CPython 3.11.6
+                root: /scratch/eyavuz21/home-moved/eyavuz21/repos/MoLoRAs/lora_attention
+                slurm:
+                    cluster_name: valar
+                    conf: /etc/slurm/slurm.conf
+                    cpus_on_node: "1"
+                    export_env: ALL,WANDB_API_KEY=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
+                    get_user_env: "1"
+                    gpus_on_node: "1"
+                    gtids: "0"
+                    job_account: ai
+                    job_cpus_per_node: "1"
+                    job_end_time: "1777745687"
+                    job_gid: "1810810000"
+                    job_gpus: "3"
+                    job_id: "1041539"
+                    job_name: LoRA-AE-Overfit1
+                    job_nodelist: ai14
+                    job_num_nodes: "1"
+                    job_partition: ai
+                    job_qos: ai
+                    job_start_time: "1777731287"
+                    job_uid: "1112615"
+                    job_user: eyavuz21
+                    jobid: "1041539"
+                    localid: "0"
+                    mem_per_node: "24576"
+                    nnodes: "1"
+                    nodeid: "0"
+                    nodelist: ai14
+                    oom_kill_step: "0"
+                    prio_process: "0"
+                    procid: "0"
+                    submit_dir: /scratch/eyavuz21/home-moved/eyavuz21/repos/MoLoRAs/lora_attention
+                    submit_host: login01.kuvalar.ku.edu.tr
+                    task_pid: "1816305"
+                    tasks_per_node: "1"
+                    topology_addr: ai14
+                    topology_addr_pattern: node
+                startedAt: "2026-05-02T14:15:04.553948Z"
+                writerId: mk6euluqi6mp2styfqhyzwcvuxsjest7
+        m: []
+        python_version: 3.11.6
+        t:
+            "1":
+                - 1
+            "2":
+                - 1
+            "3":
+                - 2
+                - 13
+                - 16
+                - 61
+            "4": 3.11.6
+            "5": 0.26.1
+            "12": 0.26.1
+            "13": linux-x86_64
+batch_size:
+    value: 1
+cos_weight:
+    value: 0
+d_model:
+    value: 512
+delta_weight:
+    value: 0
+latent_dim:
+    value: 41472
+limit:
+    value: 1
+log_every:
+    value: 1
+lr:
+    value: 0.0003
+max_steps:
+    value: 1000
+norm_weight:
+    value: 0
+num_heads:
+    value: 8
+num_layers:
+    value: 4
+num_workers:
+    value: 0
+output_dir:
+    value: /scratch/eyavuz21/lora_autoencoder/overfit1_debug
+rel_weight:
+    value: 0
+save_every:
+    value: 250
+seed:
+    value: 0
+tensor_weight:
+    value: 1
+wandb:
+    value: true
+wandb_project:
+    value: lora-autoencoder
+wandb_run_name:
+    value: overfit1_debug
+zoo_dir:
+    value: /home/eyavuz21/repos/B-LoRA/blora_zoo/bloras

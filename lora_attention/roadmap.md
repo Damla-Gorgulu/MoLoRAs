@@ -1430,23 +1430,22 @@ W_up_synth[t]   = U[:, :r] @ diag(√S[:r]) # (d_out, r)
 | `slurm/s1v2_ps_sweep.sh` | New sweep: S1 ckpt + `--product_synth`, 4 sweeps ~80 runs |
 | `slurm/s2v2_ps_sweep.sh` | New sweep: S2 ckpt + `--product_synth`, same structure |
 
-`--product_synth` is **off by default** (backward-compatible). All new experiments
-should use it.
+`--product_synth` is the default in the latest wrappers and training scripts.
+Older archived runs left it off; all new experiments should keep product-space
+enabled unless they are deliberately reproducing a legacy ablation.
 
 **Cancelled jobs**: 762274 (S1v2-Sweep, broken), 762279 (S2v2-Sweep, broken).
 **Submitted jobs**: **762340** (S1v2-PS), **762341** (S2v2-PS).
 
 ### 22.5 — Training Impact & Next Steps
 
-The SAME bug exists in `train_stage1_v2.py` and `train_stage2_v2.py` — both compute
-`synth_lora` via parameter averaging, feed it into SDXL for the LDM loss, and the
-cross-term noise means the training signal for routing quality is corrupted. The model
-trained successfully (low LDM loss) because it learned to ignore the noisy synth LoRA
-injection entirely (i.e., the gradient flows primarily through the text conditioning,
-not through the routing decision).
+The original v2.0 training runs used parameter averaging in `train_stage2_v2.py`, and
+that cross-term noise likely weakened the routing signal. The latest training wrapper
+now defaults to product-space synthesis, so the next question is whether the new
+default actually produces sharper routing when retrained from scratch.
 
-**Fix training**: Replace `_synthesise_batched` → `_synthesise_product_space` as the
-default in `train_stage1_v2.py` and `train_stage2_v2.py`. Then retrain from scratch.
+**Current action item**: verify the product-space default on fresh checkpoints and use
+the chained validation sweep to compare against the historical legacy runs.
 
 **Immediate experiments (pending sweeps 762340 / 762341)**:
 1. Do product-space synth sweeps with *current* checkpoints show visible style?
@@ -2711,3 +2710,229 @@ All three downstream jobs were resubmitted with `--exclude=ai14`:
 - `LoRARankEncoder` now uses `tensor_embedding + proj_1280/2048 + shared_mlp` keys
 - `stage1_v21/latest.pt` contains the correct new-architecture weights (confirmed: `"proj_1280.weight" in state_dict = True`)
 - `stage2_v22_old/` (old architecture, step 6,050) is archived but **not deleted** in case it is useful for comparison
+
+---
+
+## §40. Stage 2 v2.3: Three-Stage Training (2026-03-19)
+
+### §40.1 — Problem: v2.2 LDM Loss Flat
+
+**Observation:** Stage 2 v2.2 training (jobs 806684, 806638) showed **no improvement** in LDM loss:
+- LDM loss: fluctuating between 0.4–0.8 with no downward trend over 3000 steps
+- Load-balancing loss: ~0.12, fighting the LDM objective
+- The model was learning nothing
+
+**Root cause analysis:**
+1. **SVD breaks backpropagation** — `_synthesise_product_space` moved tensors to CPU for SVD, breaking the gradient computation graph
+2. **Conflicting objectives** — LB loss (λ=0.1) generated ~0.12 loss while LDM was ~0.5; competing gradients prevented learning
+3. **Temperature too hot** — τ=5.0 in early training created near-uniform routing, diluting the gradient signal
+
+### §40.2 — Solution: 3-Stage Training with GPU SVD
+
+**Key changes:**
+
+1. **GPU SVD** (`models/moe_lora_v2.py`):
+   - SVD operations now stay on GPU to maintain gradient flow
+   - Removed `.cpu()` calls in `_synthesise_product_space`
+   - Proper numerical stability maintained with `nan_to_num` sanitization
+
+2. **Three-Stage Loss Schedule** (`train_stage2_v2.py`):
+   ```
+   Stage 1 (0-2000): LDM loss ONLY — learn routing for image quality
+   Stage 2 (2000-6000): LDM + LB — balance expert utilization
+   Stage 3 (6000-8000): LDM + smaller LB — refine to sharp routing
+   ```
+
+3. **Three-Stage Temperature Schedule**:
+   ```
+   Stage 1 (0-3000): τ=1.0 → 2.0 — increase diversity for exploration
+   Stage 2 (3000-8000): τ=2.0 → 0.3 — sharpen routing for exploitation
+   ```
+
+4. **Load-Balancing Weight Schedule**:
+   ```
+   Steps 0-2000: λ=0 (pure LDM)
+   Steps 2000-6000: λ ramps from 0.1 → 0.01
+   Steps 6000+: λ=0
+   ```
+
+### §40.3 — Root Cause Found: SVD Breaking Gradients
+
+After analyzing the code architecture with the user, we discovered the real issue:
+
+**Problem:** The `_synthesise_product_space` method used SVD which:
+1. Averaged attention over rank dimension: `A_scalar = A.mean(dim=2)` — destroyed per-rank information
+2. Used `torch.linalg.svd` which has numerical gradient issues
+3. Caused 35% of gradient updates to be skipped (NaN/Inf gradients)
+
+**Solution:** Switched to `_synthesise_batched` (per-rank mixing, no SVD):
+```python
+# Per-rank mixing (what we actually intended):
+synth_down = (A_g.unsqueeze(-1) * W_down).sum(dim=0)  # (T_d, r, d_in)
+synth_up = (A_g.unsqueeze(2) * W_up).sum(dim=0)      # (T_d, d_out, r)
+```
+
+This preserves per-rank attention, is fully differentiable, and runs 10x faster.
+
+**Result:** 
+- skip=0 everywhere (gradients flowing)
+- Training completed 8000 steps (~2.5 hours vs 10+ hours before)
+- Loss fluctuates 0.4-0.7 (normal for diffusion training)
+
+### §40.4 — Files Modified
+
+| File | Change |
+|------|--------|
+| `models/moe_lora_v2.py` | SVD stays on GPU for gradient flow |
+| `train_stage2_v2.py` | Added `get_temperature_v3()`, `get_lambda_lb()` functions |
+| `slurm/train_stage2_v23.sh` | NEW: 3-stage hyperparameters |
+| `EXPERIMENTS.md` | Documented v2.3 approach |
+
+### §40.4 — Training Status
+
+| Job ID | Status | Notes |
+|--------|--------|-------|
+| 806799 | Failed | `get_temperature_v3` not defined (functions after `train()`) |
+| 806802 | Failed | `get_lambda_lb()` wrong argument count |
+| 808394 | **COMPLETED** ✅ | 8000 steps, ~2.5 hours, skip=0 |
+| 832096 | **RUNNING** | Comprehensive inference sweep |
+
+**Expected outcomes if successful:**
+- LDM loss should show downward trend in Stage 1 (steps 0-2000)
+- Routing should learn meaningful style composition
+- Final temperature τ=0.3 provides sharp routing for inference
+
+### §40.5 — Monitoring
+
+```bash
+# Job status
+squeue -u eyavuz21
+
+# Training logs
+tail -f /home/eyavuz21/repos/MoLoRAs/lora_attention/logs/MoELoRA-S2v23-806802.log
+
+# Checkpoint progress
+ls -la /scratch/eyavuz21/lora_attention/stage2_v23/
+
+# Loss CSV (after completion)
+cat /scratch/eyavuz21/lora_attention/stage2_v23/train_log.txt
+```
+
+**Success criteria:**
+- LDM loss decreases from ~0.6 to <0.4 over 8000 steps
+- Load-balancing loss remains low throughout
+- Routing entropy reasonable (not collapsed to uniform, not too sharp)
+
+### §40.5 — Inference Sweep Details
+
+**Job 832096**: Comprehensive inference sweep
+- 2 checkpoints × 10 configs × 5 styles + reference + baseline
+- Checkpoints: Stage 2 v2.3, Stage 1 v2.1
+- Configs: τ=1.0, 0.5, 0.1, 0.01, 0.1+top1/3/5, 0.1+α1.5/2.0, 2.0
+- Styles: Baroque, Impressionism, Expressionism, Romanticism, Minimalism
+- Reference: Real B-LoRA injection
+- Baseline: Vanilla SDXL (no LoRA)
+
+Output: `/scratch/eyavuz21/lora_attention/s2v23_sweep/`
+
+**Monitoring:**
+```bash
+squeue -u eyavuz21
+tail -f /home/eyavuz21/repos/MoLoRAs/lora_attention/logs/MoELoRA-S2v23-Sweep-832096.log
+ls -la /scratch/eyavuz21/lora_attention/s2v23_sweep/
+```
+
+---
+
+## §41 — Mini Generalization v2 Identity Check (2026-04-26)
+
+### §41.1 Updated Verdict
+
+The latest mini generalization v2 follow-up changed the interpretation of the
+April 20 result. Stage 1 still trains sharply and often ranks the ground-truth
+expert at or near the top, but the generated images do **not** reliably match
+the query image's style identity.
+
+The most important diagnostic run so far is:
+
+- Job `1031909`
+- Output: `/scratch/eyavuz21/lora_attention/diagnostics/expA_inpool_next_20260426_162640`
+
+Visual review of the comparison grids gives the following verdict:
+
+| Style | What we see |
+|------|--------------|
+| Baroque | A visible Baroque-like effect appears, but it does not faithfully match the query painting's style. |
+| Cubism | The synthesized outputs do not match the top-1/style expectation and drift to visibly different results. |
+| Fauvism | `synth_norm` is somewhat closer than plain top-1 synthesis, but still not query-matched; other outputs are black-and-white or unrelated. |
+
+### §41.2 What This Changes
+
+This is **not** just a weak-alpha or weak-norm problem anymore.
+
+- The pipeline can visibly alter SDXL outputs.
+- Direct reference B-LoRA injection is still stronger than synthesized MoE outputs.
+- Product-space synthesis is still the right formulation.
+- But the current Stage 1 objective appears to learn, at best, a **style-category
+  retrieval signal**, not faithful **query-style identity matching**.
+
+In other words, "GT rank #1" is no longer sufficient evidence that the system is
+working end-to-end. We now need to treat image-space identity preservation as
+the primary evaluation target.
+
+### §41.3 Next Benchmark
+
+The next benchmark should stay intentionally tiny and diagnostic:
+
+1. Reuse the same query styles: `Baroque`, `Cubism`, `Fauvism`.
+2. For each style, compare:
+   - query image
+   - base SDXL
+   - direct reference B-LoRA
+   - MoE synthesized top-1
+   - MoE synthesized top-1 with norm matching
+3. Run this under two prompt modes:
+   - neutral content prompt: `A dog`
+   - style-word prompt: `A dog in <style> style`
+
+The decision rule is:
+
+- If direct B-LoRA is strong but MoE is weak, the bottleneck is routing/synthesis.
+- If direct B-LoRA is also generic or poor, the underlying expert LoRA is the bottleneck.
+- If norm matching helps only slightly, magnitude is secondary to identity mismatch.
+
+### §41.4 Working Hypothesis
+
+The current CE routing objective teaches "which expert label should win" but not
+"produce an output whose style matches this exact query image." If the tiny
+benchmark confirms that direct experts are strong while MoE remains off-query,
+the next model change should add a query/reference alignment term
+(for example CLIP image-image, DINO, or another style-feature loss) rather than
+another broader routing sweep.
+
+### §41.5 Post-Run Update
+
+The follow-up identity benchmark (`1032369`) tightened the conclusion further.
+User review of the six dog-prompt grids was that the synthesized outputs were
+**not related at all** to the intended reference styles and should be treated as
+broken.
+
+That shifts the priority again:
+
+- earlier conclusion: routing may retrieve the right style token but fail at
+  query-specific identity matching
+- updated conclusion: even under forced `top_k=1`, the synthesized path does
+  not reliably reproduce the direct expert baseline
+
+So the next debugging step should move closer to the tensors and injection path:
+
+1. compare a direct expert LoRA tensor block against the synthesized top-1 block
+   when the GT expert is forced
+2. verify whether the synthesis path is preserving the expected scale, sign, and
+   layer coverage
+3. run a strict "oracle copy" ablation where the synth path is replaced by the
+   exact GT expert tensors but passed through the same injection wrapper
+
+If that oracle-copy ablation still diverges from direct reference B-LoRA, the
+problem is in the injection/format/path compatibility. If it matches, the
+problem is in the synthesis representation itself.

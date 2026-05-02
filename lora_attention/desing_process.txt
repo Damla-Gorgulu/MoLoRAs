@@ -1,0 +1,334 @@
+============================================================
+LEARNED QUERY-KEY ROUTING FOR LORA ATTENTION LAYERS
+============================================================
+
+
+Core idea:
+
+We should not assume the image embedding and LoRA weights already live in the
+same space. They are different kinds of data. The model needs learnable
+transformers on both sides:
+
+1. an image-side network that turns the style image embedding into queries
+2. a LoRA-side network that turns LoRA attention-layer weights into keys
+3. attention between those queries and keys decides which LoRA layers/ranks/tensors
+   should be used
+
+
+============================================================
+HIGH-LEVEL DIAGRAM
+============================================================
+
+
+                 IMAGE / STYLE SIDE
+                 ------------------
+
+              [ Style Reference Image ]
+                         |
+                         |
+                         v
+              [ Image Encoder / Embedding ]
+              CLIP, VAE encoder, or another image encoder
+                         |
+                         |
+                         v
+        [ Learnable Non-Compressing Query Transformer ]
+        - keeps rich information
+        - does not collapse too early
+        - learns how image/style information should be shaped
+          for LoRA routing
+                         |
+                         |
+                         v
+                  [ Query Tokens Q ]
+
+
+
+                 LORA WEIGHT SIDE
+                 ----------------
+
+          [ Pool of Frozen Expert LoRAs ]
+                         |
+                         |
+                         v
+        For each expert LoRA:
+        For each target attention layer / tensor:
+
+              [ LoRA Attention Weight Tensor ]
+              examples:
+              - W_down for to_q
+              - W_up   for to_q
+              - W_down for to_k
+              - W_up   for to_k
+              - W_down for to_v
+              - W_up   for to_v
+              - W_down for to_out
+              - W_up   for to_out
+                         |
+                         |
+                         v
+        [ Learnable LoRA Weight Transformer / Key Encoder ]
+        - larger model than a small summary MLP
+        - reads actual LoRA weight structure
+        - learns how each layer/rank/tensor should be represented
+        - outputs keys for attention
+                         |
+                         |
+                         v
+                   [ Key Tokens K ]
+
+
+
+                 ROUTING / ATTENTION
+                 -------------------
+
+                  [ Query Tokens Q ]
+                         |
+                         | scaled dot-product attention
+                         | Q K^T / sqrt(d)
+                         v
+                   [ Attention Scores ]
+                         |
+                         | softmax over experts / layers / ranks
+                         v
+                 [ Routing Weights A ]
+
+
+
+                 LORA SYNTHESIS
+                 --------------
+
+                 [ Routing Weights A ]
+                         |
+                         |
+                         v
+        Select / weight LoRA components:
+        - expert level
+        - attention layer level
+        - tensor level
+        - rank level if needed
+                         |
+                         |
+                         v
+                [ Synthesized LoRA Weights ]
+                         |
+                         |
+                         v
+                  [ Inject into SDXL UNet ]
+                         |
+                         |
+                         v
+                 [ Generated Styled Image ]
+
+
+============================================================
+COMPACT VERSION
+============================================================
+
+
+Image path:
+
+  image
+    -> image encoder
+    -> learnable non-compressing query transformer
+    -> Q
+
+
+LoRA path:
+
+  LoRA attention weights
+    -> learnable LoRA weight transformer
+    -> K
+
+
+Routing:
+
+  A = softmax(Q K^T / sqrt(d))
+
+
+Synthesis:
+
+  A weights the LoRA experts / layers / tensors / ranks
+    -> synthesized LoRA
+    -> SDXL
+
+
+============================================================
+WHY THIS IS NEEDED
+============================================================
+
+
+The image embedding and LoRA weights are not naturally comparable.
+
+An image embedding describes visual content/style.
+A LoRA tensor describes a parameter-space modification inside SDXL.
+
+Those two objects do not automatically share a coordinate system.
+
+So the model must learn two transformations:
+
+1. image embedding -> query space
+2. LoRA weights -> key space
+
+Only after those transformations does attention make sense.
+
+
+============================================================
+DESIGN PRINCIPLES
+============================================================
+
+
+1. Do not compress the image too early.
+
+   The query network should preserve enough style/content information for routing.
+   A tiny bottleneck can destroy the details needed to choose the correct LoRA layer.
+
+
+2. Do not summarize LoRA weights with simple statistics only.
+
+   Mean/std/max summaries lose the structure of the LoRA tensor. The model needs to
+   see the actual weight layout so it can learn what each rank/layer represents.
+
+
+3. Use a learnable LoRA-side encoder.
+
+   The key encoder should learn how to transform LoRA weights into a space where
+   image queries can attend to them.
+
+
+4. Route at the layer/tensor level.
+
+   Different attention layers can carry different style information. The router
+   should be able to assign different experts to different layers.
+
+
+5. Rank-level routing is optional but desirable.
+
+   If possible, attention should go deeper than layer-level and assign weights per
+   LoRA rank. This keeps the original rank-level MoE idea.
+
+
+============================================================
+POSSIBLE SHAPES
+============================================================
+
+
+Let:
+
+  N = number of expert LoRAs
+  T = number of target LoRA tensor groups / attention-layer tensors
+  r = LoRA rank
+  d = shared attention dimension
+
+
+Image query output:
+
+  Q: L_q x d
+
+or, if one query per layer:
+
+  Q: T x d
+
+
+LoRA key output:
+
+  K: N x T x d
+
+or, with rank-level routing:
+
+  K: N x T x r x d
+
+
+Attention output:
+
+  A: N x T
+
+or, with rank-level routing:
+
+  A: N x T x r
+
+
+
+============================================================
+IMPORTANT OPEN QUESTION
+============================================================
+
+
+How should the LoRA-side transformer read a weight tensor?
+
+Possible tokenizations:
+
+1. one token per LoRA tensor
+2. one token per rank
+3. one token per block/projection pair
+4. flattened patches of the weight matrix
+5. separate tokens for W_down and W_up, then fuse them
+
+
+The likely best starting point:
+
+  one token per rank using W_down and W_up information together
+
+because LoRA style information is carried by the product:
+
+  delta_W = W_up @ W_down
+
+
+============================================================
+MINIMAL ARCHITECTURE DRAFT
+============================================================
+
+
+              image
+                |
+                v
+          image encoder
+                |
+                v
+      QueryTransformer
+                |
+                v
+                Q
+
+
+              LoRA pool
+                |
+                v
+      extract target attention tensors
+                |
+                v
+      LoRAWeightTransformer
+                |
+                v
+                K
+
+
+              Q, K
+                |
+                v
+      cross-attention / routing attention
+                |
+                v
+                A
+
+
+              A + LoRA tensors
+                |
+                v
+          synthesize LoRA
+                |
+                v
+            inject into SDXL
+                |
+                v
+          generated image
+
+
+============================================================
+ONE-SENTENCE SUMMARY
+============================================================
+
+
+Use a learnable image-to-query transformer and a learnable LoRA-weight-to-key
+transformer, then use attention between them to decide which LoRA experts,
+layers, tensors, and ranks should be activated for the query style image.

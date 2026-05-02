@@ -58,13 +58,15 @@ ZOO_DIR="/home/eyavuz21/repos/B-LoRA/blora_zoo/bloras"
 STYLE_IMG_DIR="/home/eyavuz21/repos/B-LoRA/blora_zoo/style_images"
 CACHE_DIR="/scratch/eyavuz21/lora_attention"
 CKPT="${CKPT:-/scratch/eyavuz21/lora_attention/stage1_v21/latest.pt}"
-OUT_ROOT="/scratch/eyavuz21/lora_attention/s1v21_inference_sweep_a2"
+RUN_TAG="${RUN_TAG:-s1v21_inf_$(date +%Y%m%d_%H%M%S)}"
+OUT_ROOT="/scratch/eyavuz21/lora_attention/s1v21_inference_sweep_runs/${RUN_TAG}"
 
 export PYTHONPATH="$REPO_ROOT:${REPO_ROOT}/../B-LoRA-fresh/B-LoRA:${PYTHONPATH:-}"
 
 mkdir -p "$OUT_ROOT"
 
 echo "CKPT:     $CKPT"
+echo "RUN_TAG:  $RUN_TAG"
 echo "OUT_ROOT: $OUT_ROOT"
 
 # ── Fixed settings ───────────────────────────────────────────
@@ -118,6 +120,7 @@ run() {
         --num_inference_steps "$STEPS" \
         --guidance_scale      "$GUIDANCE" \
         --seed                "$SEED" \
+        --run_tag             "$RUN_TAG" \
         --query_label         "$tag" \
         "${extra_args[@]}" \
     || { echo "  !! FAILED: $tag"; FAIL_COUNT=$((FAIL_COUNT + 1)); }
@@ -141,10 +144,10 @@ POOL_IMGS[cubism]="$STYLE_IMG_DIR/style_0003_Cubism/style_0003_Cubism.jpg"
 POOL_IMGS[impressionism]="$STYLE_IMG_DIR/style_0005_Impressionism/style_0005_Impressionism.jpg"
 POOL_IMGS[expressionism]="$STYLE_IMG_DIR/style_0010_Expressionism/style_0010_Expressionism.jpg"
 
-STYLE_PROMPTS[baroque]="A Baroque"
-STYLE_PROMPTS[cubism]="A Cubism"
-STYLE_PROMPTS[impressionism]="An Impressionism"
-STYLE_PROMPTS[expressionism]="An Expressionism"
+STYLE_PROMPTS[baroque]="A dog in Baroque style"
+STYLE_PROMPTS[cubism]="A dog in Cubism style"
+STYLE_PROMPTS[impressionism]="A dog in Impressionism style"
+STYLE_PROMPTS[expressionism]="A dog in Expressionism style"
 
 NEUTRAL_PROMPTS[baroque]="A painting of a village scene"
 NEUTRAL_PROMPTS[cubism]="A painting of a still life"
@@ -162,22 +165,22 @@ REF_BLORAS[impressionism]="$ZOO_DIR/style_0005_Impressionism/pytorch_lora_weight
 REF_BLORAS[expressionism]="$ZOO_DIR/style_0010_Expressionism/pytorch_lora_weights.safetensors"
 
 # ════════════════════════════════════════════════════════════════
-# SWEEP 1: Product-space synth + style prompt
-# τ=[0.005, 0.05, 0.5] × top_k=[none,1] — routing sharpness sweep.
-# top_k=1 forces oracle single-expert routing (best case baseline).
-# 4 styles × 2 sources × 3 temps × 2 topk = 48 runs
+# SWEEP 1: Product-space synth + style prompt (expanded hypergrid)
+# τ × top_k × alpha search for stronger coverage.
+# 4 styles × 1 source(wikiart) × 5 temps × 3 topk × 3 alpha = 180 runs
 # ════════════════════════════════════════════════════════════════
 echo ""
-echo "════════════ SWEEP 1: Product-space synth + style prompt ════════════"
+echo "════════════ SWEEP 1: Expanded hypergrid (style prompt) ════════════"
 
-TEMPS=(0.005 0.05 0.5)
-TOPKS=(none 1)
+TEMPS=(0.001 0.005 0.02 0.05 0.1)
+TOPKS=(none 1 3)
+ALPHAS=(1.0 2.0 3.0)
 
 for style in "${STYLE_LIST[@]}"; do
     eval prompt="\${STYLE_PROMPTS[$style]}"
     eval gt="\${GT_EXPERTS[$style]}"
 
-    for src in wikiart pool; do
+    for src in wikiart; do
         if [[ "$src" == "wikiart" ]]; then
             eval img="\${WIKIART_IMGS[$style]}"
         else
@@ -186,35 +189,41 @@ for style in "${STYLE_LIST[@]}"; do
 
         for temp in "${TEMPS[@]}"; do
             for topk in "${TOPKS[@]}"; do
-                tag="${style}/${src}/ps_t${temp}_k${topk}"
-                run "$tag" "$img" "$prompt" "$temp" "$topk" "$ALPHA" "none" "$gt" "true"
+                for alpha in "${ALPHAS[@]}"; do
+                    tag="${style}/${src}/ps_t${temp}_k${topk}_a${alpha}"
+                    run "$tag" "$img" "$prompt" "$temp" "$topk" "$alpha" "none" "$gt" "true"
+                done
             done
         done
     done
 done
 
 # ════════════════════════════════════════════════════════════════
-# SWEEP 2: Product-space synth + NEUTRAL prompt
-# Removes text-style cue so synth LoRA carries the style signal alone.
-# 4 styles × 2 sources × 2 temps = 16 runs
+# SWEEP 2: Product-space synth + NEUTRAL prompt (expanded)
+# 4 styles × 1 source(wikiart) × 2 temps × 2 alpha = 16 runs
 # ════════════════════════════════════════════════════════════════
 echo ""
 echo "════════════ SWEEP 2: Product-space synth + neutral prompt ════════════"
+
+NEUTRAL_TEMPS=(0.005 0.1)
+NEUTRAL_ALPHAS=(1.0 2.0)
 
 for style in "${STYLE_LIST[@]}"; do
     eval neutral="\${NEUTRAL_PROMPTS[$style]}"
     eval gt="\${GT_EXPERTS[$style]}"
 
-    for src in wikiart pool; do
+    for src in wikiart; do
         if [[ "$src" == "wikiart" ]]; then
             eval img="\${WIKIART_IMGS[$style]}"
         else
             eval img="\${POOL_IMGS[$style]}"
         fi
 
-        for temp in "0.005" "0.5"; do
-            tag="${style}/${src}/ps_neutral_t${temp}"
-            run "$tag" "$img" "$neutral" "$temp" "none" "$ALPHA" "none" "$gt" "true"
+        for temp in "${NEUTRAL_TEMPS[@]}"; do
+            for alpha in "${NEUTRAL_ALPHAS[@]}"; do
+                tag="${style}/${src}/ps_neutral_t${temp}_a${alpha}"
+                run "$tag" "$img" "$neutral" "$temp" "none" "$alpha" "none" "$gt" "true"
+            done
         done
     done
 done

@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import torch
-from PIL import Image
+from PIL import Image, ImageEnhance, ImageOps
 from torch.utils.data import Dataset
 
 from ..models.lora_pool import LoRAPool
@@ -57,6 +57,28 @@ def _sample_pool_indices(
         pool = others + [gt_idx]
         rng.shuffle(pool)
         return pool
+
+
+def _exact_style_augment(img: Image.Image, rng: random.Random) -> Image.Image:
+    """Style-preserving exact-exemplar augmentation."""
+    if rng.random() < 0.5:
+        img = ImageOps.mirror(img)
+
+    angle = rng.uniform(-5.0, 5.0)
+    if abs(angle) > 0.25:
+        fill = img.getpixel((0, 0))
+        img = img.rotate(
+            angle,
+            resample=Image.BICUBIC,
+            expand=False,
+            fillcolor=fill,
+        )
+
+    img = ImageEnhance.Brightness(img).enhance(1.0 + rng.uniform(-0.05, 0.05))
+    img = ImageEnhance.Contrast(img).enhance(1.0 + rng.uniform(-0.05, 0.05))
+    img = ImageEnhance.Color(img).enhance(1.0 + rng.uniform(-0.03, 0.03))
+    img = ImageEnhance.Sharpness(img).enhance(1.0 + rng.uniform(-0.03, 0.03))
+    return img
 
 
 # ──────────────────────────────────────────────────────────────
@@ -580,6 +602,186 @@ class WikiArtStage2Dataset(Dataset):
         }
 
 
+class ExactExemplarStage1Dataset(Dataset):
+    """
+    Stage 1 exact-instance retrieval dataset.
+
+    Each sample uses the exact B-LoRA exemplar image as the query source, with
+    style-preserving augmentations applied on the fly.
+    """
+
+    def __init__(
+        self,
+        pool: LoRAPool,
+        manifest_path: str,
+        min_pool_size: int = 4,
+        max_pool_size: int = 4,
+        views_per_style: int = 32,
+        seed: Optional[int] = None,
+        deterministic_augment: bool = False,
+        image_transform=None,
+    ):
+        self.pool = pool
+        self.rank = 64
+        self.min_pool_size = min_pool_size
+        self.max_pool_size = min(max_pool_size, pool.num_experts)
+        self.image_transform = image_transform
+        self.deterministic_augment = deterministic_augment
+        self.seed = seed or 0
+
+        with open(manifest_path) as f:
+            manifest = json.load(f)
+
+        self.entries: List[Dict] = manifest["styles"]
+        self.samples: List[Tuple[int, Path, str]] = []
+
+        for entry in self.entries:
+            expert_name = entry["expert_name"]
+            source_image = Path(entry["source_image"])
+            gt_idx = pool.index_of(expert_name)
+            for _ in range(views_per_style):
+                self.samples.append((gt_idx, source_image, expert_name))
+
+        if not self.samples:
+            raise RuntimeError(f"No exact exemplar samples found in {manifest_path}")
+
+        self.rng = random.Random(seed)
+        print(
+            f"[ExactExemplarStage1Dataset] {len(self.samples)} samples, "
+            f"{len(self.entries)} exemplars, pool ∈ [{self.min_pool_size}, {self.max_pool_size}]"
+        )
+
+    def __len__(self) -> int:
+        return len(self.samples)
+
+    def _augment(self, img: Image.Image, idx: int) -> Image.Image:
+        if self.deterministic_augment:
+            rng = random.Random(self.seed + idx * 101)
+        else:
+            # Keep the augmentation stochastic across epochs while still being
+            # reproducible enough to debug the data path.
+            rng = self.rng
+        return _exact_style_augment(img, rng)
+
+    def __getitem__(self, idx: int) -> Dict:
+        gt_idx, img_path, style_name = self.samples[idx]
+
+        img = Image.open(img_path).convert("RGB")
+        img = self._augment(img, idx)
+        if self.image_transform is not None:
+            img = self.image_transform(img)
+
+        n = self.rng.randint(self.min_pool_size, self.max_pool_size)
+        pool_indices = _sample_pool_indices(
+            gt_idx, n, self.pool.num_experts, exclude_gt=False, rng=self.rng
+        )
+        gt_pos = pool_indices.index(gt_idx)
+        soft_target = torch.zeros(len(pool_indices))
+        soft_target[gt_pos] = 1.0
+
+        return {
+            "image": img,
+            "gt_idx": gt_idx,
+            "pool_indices": pool_indices,
+            "gt_pos": gt_pos,
+            "soft_target": soft_target,
+            "style_name": style_name,
+        }
+
+
+class ExactExemplarStage2Dataset(Dataset):
+    """
+    Stage 2 exact-instance dataset.
+
+    Uses the same exact exemplar source images as Stage 1, but excludes the GT
+    expert from the pool so Stage 2 can test whether composition over the other
+    experts can still reconstruct a useful style signal.
+    """
+
+    def __init__(
+        self,
+        pool: LoRAPool,
+        manifest_path: str,
+        min_pool_size: int = 3,
+        max_pool_size: int = 4,
+        views_per_style: int = 32,
+        seed: Optional[int] = None,
+        deterministic_augment: bool = False,
+        image_transform=None,
+        prompt_mode: str = "neutral",
+    ):
+        self.pool = pool
+        self.min_pool_size = min_pool_size
+        self.max_pool_size = min(max_pool_size, max(pool.num_experts - 1, 1))
+        self.image_transform = image_transform
+        self.deterministic_augment = deterministic_augment
+        self.seed = seed or 0
+        self.prompt_mode = prompt_mode
+
+        with open(manifest_path) as f:
+            manifest = json.load(f)
+
+        self.entries: List[Dict] = manifest["styles"]
+        self.samples: List[Tuple[int, Path, str, str]] = []
+
+        for entry in self.entries:
+            expert_name = entry["expert_name"]
+            source_image = Path(entry["source_image"])
+            gt_idx = pool.index_of(expert_name)
+            category = entry.get("category", expert_name)
+            for _ in range(views_per_style):
+                self.samples.append((gt_idx, source_image, expert_name, category))
+
+        if not self.samples:
+            raise RuntimeError(f"No exact exemplar Stage 2 samples found in {manifest_path}")
+
+        self.rng = random.Random(seed)
+        print(
+            f"[ExactExemplarStage2Dataset] {len(self.samples)} samples, "
+            f"{len(self.entries)} exemplars, pool ∈ [{self.min_pool_size}, {self.max_pool_size}]"
+        )
+
+    def __len__(self) -> int:
+        return len(self.samples)
+
+    def _augment(self, img: Image.Image, idx: int) -> Image.Image:
+        if self.deterministic_augment:
+            rng = random.Random(self.seed + idx * 101)
+        else:
+            rng = self.rng
+        return _exact_style_augment(img, rng)
+
+    def _build_prompt(self, category: str) -> str:
+        readable = category.replace("_", " ")
+        if self.prompt_mode == "style":
+            return f"A painting in {readable} style"
+        if self.prompt_mode == "minimal":
+            return "A painting"
+        return "A detailed painting"
+
+    def __getitem__(self, idx: int) -> Dict:
+        gt_idx, img_path, style_name, category = self.samples[idx]
+
+        img = Image.open(img_path).convert("RGB")
+        img = self._augment(img, idx)
+        if self.image_transform is not None:
+            img = self.image_transform(img)
+
+        n = self.rng.randint(self.min_pool_size, self.max_pool_size)
+        pool_indices = _sample_pool_indices(
+            gt_idx, n, self.pool.num_experts, exclude_gt=True, rng=self.rng
+        )
+        prompt = self._build_prompt(category)
+
+        return {
+            "image": img,
+            "prompt": prompt,
+            "gt_idx": gt_idx,
+            "pool_indices": pool_indices,
+            "style_name": style_name,
+        }
+
+
 # ──────────────────────────────────────────────────────────────
 # v2.0 collate functions
 # ──────────────────────────────────────────────────────────────
@@ -601,6 +803,29 @@ def wikiart_stage1_collate_fn(batch: List[Dict]) -> Dict:
         "pool_indices": [s["pool_indices"] for s in batch],
         "gt_positions": [s["gt_pos"] for s in batch],
         "soft_targets": [s["soft_target"] for s in batch],
+        "style_names": [s["style_name"] for s in batch],
+    }
+
+
+def exact_stage1_collate_fn(batch: List[Dict]) -> Dict:
+    """Collate exact-exemplar Stage 1 samples."""
+    return {
+        "images": [s["image"] for s in batch],
+        "gt_indices": [s["gt_idx"] for s in batch],
+        "pool_indices": [s["pool_indices"] for s in batch],
+        "gt_positions": [s["gt_pos"] for s in batch],
+        "soft_targets": [s["soft_target"] for s in batch],
+        "style_names": [s["style_name"] for s in batch],
+    }
+
+
+def exact_stage2_collate_fn(batch: List[Dict]) -> Dict:
+    """Collate exact-exemplar Stage 2 samples."""
+    return {
+        "images": [s["image"] for s in batch],
+        "prompts": [s["prompt"] for s in batch],
+        "gt_indices": [s["gt_idx"] for s in batch],
+        "pool_indices": [s["pool_indices"] for s in batch],
         "style_names": [s["style_name"] for s in batch],
     }
 

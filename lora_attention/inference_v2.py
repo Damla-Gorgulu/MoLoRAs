@@ -125,6 +125,8 @@ def parse_args():
     p.add_argument("--exclude_experts", type=str, nargs="+", default=None)
     p.add_argument("--gt_expert", type=str, default=None)
     p.add_argument("--query_label", type=str, default=None)
+    p.add_argument("--run_tag", type=str, default=None,
+                   help="Optional run tag added to output filenames.")
 
     # Model
     p.add_argument("--clip_model_id", type=str,
@@ -144,8 +146,11 @@ def parse_args():
                    help="Use product-space synthesis (RECOMMENDED). "
                         "Computes ΔW = Σ A_i*(W_up_i @ W_down_i) then decomposes "
                         "back to LoRA via SVD. Fixes the O(N²) cross-term "
-                        "cancellation bug in the default parameter-averaging mode. "
-                        "Essential when routing is near-uniform over many experts.")
+                        "cancellation bug in the legacy parameter-averaging mode. "
+                        "This is now the default inference path.")
+    p.add_argument("--legacy_synth", action="store_false", dest="product_synth",
+                   help="Use legacy parameter averaging instead of product-space synthesis.")
+    p.set_defaults(product_synth=True)
 
     # Attention
     p.add_argument("--temperature", type=float, default=0.1,
@@ -357,8 +362,15 @@ def main():
 
     # ── Save outputs ──────────────────────────────────────────
     Path(args.output_dir).mkdir(parents=True, exist_ok=True)
-    # Sanitize query_label for use as filename prefix (strip path separators)
-    label_prefix = f"{args.query_label.replace('/', '_').replace(' ', '_')}_" if args.query_label else ""
+    # Build stable filename prefix from optional run_tag + query_label.
+    prefix_parts = []
+    if args.run_tag:
+        prefix_parts.append(args.run_tag.replace('/', '_').replace(' ', '_'))
+    if args.query_label:
+        prefix_parts.append(args.query_label.replace('/', '_').replace(' ', '_'))
+    label_prefix = "_".join(prefix_parts)
+    if label_prefix:
+        label_prefix += "_"
     prompt_slug = args.prompt[:40].replace(" ", "_").replace("/", "_")
 
     for i, img in enumerate(images):
