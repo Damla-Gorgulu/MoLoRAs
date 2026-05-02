@@ -30,6 +30,25 @@ def scale_lora(state_dict, alpha):
         raise type(e)(f'failed to scale_lora, due to: {e}')
 
 
+def close_block(state_dict, block_index, prefix):
+    """Remove keys belonging to the specified transformer block from state_dict.
+    prefix should be the block path before transformer_blocks (e.g. 'unet.up_blocks.0.attentions.1').
+    block_index is the transformer block index (0-9).
+    """
+    pattern = f'{prefix}.transformer_blocks.{block_index}.'
+    return {k: v for k, v in state_dict.items() if pattern not in k}
+
+
+def close_blocks(state_dict, block_indices, prefix):
+    """Remove keys belonging to any of the specified transformer blocks from state_dict.
+    block_indices is an iterable of block indices (0-9).
+    """
+    result = state_dict
+    for idx in block_indices:
+        result = close_block(result, idx, prefix)
+    return result
+
+
 def get_target_modules(unet, blocks=None):
     try:
         if not blocks:
